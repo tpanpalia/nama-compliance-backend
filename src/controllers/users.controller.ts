@@ -1,42 +1,67 @@
 import { NextFunction, Request, Response } from 'express';
-import { prisma } from '../config/database';
+import * as UsersService from '../services/users.service';
+import { CreateUserSchema, UpdateUserStatusSchema } from '../services/users.service';
 
-export const listUsers = async (_req: Request, res: Response, next: NextFunction): Promise<void> => {
+export const list = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const data = await prisma.user.findMany({ orderBy: { createdAt: 'desc' } });
-    res.json({ data, message: 'Users fetched successfully' });
-  } catch (error) {
-    next(error);
+    const data = await UsersService.listUsers({
+      role: req.query.role as string | undefined,
+      isActive: req.query.isActive !== undefined ? req.query.isActive === 'true' : undefined,
+    });
+    res.json({ data });
+  } catch (err) {
+    next(err);
   }
 };
 
-export const getUserById = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+export const getMe = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const data = await prisma.user.findUniqueOrThrow({ where: { id: req.params.id } });
-    res.json({ data, message: 'User fetched successfully' });
-  } catch (error) {
-    next(error);
+    const data = await UsersService.getUserById(req.user!.dbUserId!);
+    res.json({ data });
+  } catch (err) {
+    next(err);
   }
 };
 
-export const updateUserStatus = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+export const getById = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const data = await prisma.user.update({ where: { id: req.params.id }, data: { isActive: req.body.isActive } });
-    res.json({ data, message: 'User status updated successfully' });
-  } catch (error) {
-    next(error);
+    const data = await UsersService.getUserById(req.params.id);
+    res.json({ data });
+  } catch (err) {
+    next(err);
   }
 };
 
-export const getMyUserProfile = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+export const create = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    if (!req.user?.dbUserId) {
-      res.status(401).json({ error: 'Unauthorized' });
-      return;
+    const parsed = CreateUserSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res
+        .status(400)
+        .json({ error: 'Validation failed', details: parsed.error.flatten().fieldErrors });
     }
-    const data = await prisma.user.findUniqueOrThrow({ where: { id: req.user.dbUserId } });
-    res.json({ data, message: 'My profile fetched successfully' });
-  } catch (error) {
-    next(error);
+    const data = await UsersService.createUser(parsed.data);
+    return res.status(201).json({ data });
+  } catch (err) {
+    return next(err);
+  }
+};
+
+export const updateStatus = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const parsed = UpdateUserStatusSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res
+        .status(400)
+        .json({ error: 'Validation failed', details: parsed.error.flatten().fieldErrors });
+    }
+    const data = await UsersService.updateUserStatus(
+      req.params.id,
+      parsed.data.isActive,
+      req.user!.dbUserId!
+    );
+    return res.json({ data });
+  } catch (err) {
+    return next(err);
   }
 };

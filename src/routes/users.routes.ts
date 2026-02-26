@@ -1,10 +1,9 @@
 import { Router } from 'express';
 import { UserRole } from '@prisma/client';
-import { getMyUserProfile, getUserById, listUsers, updateUserStatus } from '../controllers/users.controller';
+import { create, getById, getMe, list, updateStatus } from '../controllers/users.controller';
 import { authorize } from '../middleware/authorize';
 import { validate } from '../middleware/validate';
 import { idParamSchema } from '../schemas/common.schema';
-import { contractorStatusSchema } from '../schemas/contractor.schema';
 
 const router = Router();
 
@@ -20,7 +19,7 @@ const router = Router();
  *       200:
  *         description: Current user profile
  */
-router.get('/me', authorize(UserRole.INSPECTOR, UserRole.ADMIN), getMyUserProfile);
+router.get('/me', authorize(UserRole.INSPECTOR, UserRole.ADMIN), getMe);
 
 /**
  * @swagger
@@ -34,8 +33,9 @@ router.get('/me', authorize(UserRole.INSPECTOR, UserRole.ADMIN), getMyUserProfil
  *       200:
  *         description: List of internal users
  */
-router.get('/', authorize(UserRole.ADMIN), listUsers);
-router.get('/:id', authorize(UserRole.ADMIN), validate({ params: idParamSchema }), getUserById);
+router.get('/', authorize(UserRole.ADMIN), list);
+router.post('/', authorize(UserRole.ADMIN), create);
+router.get('/:id', authorize(UserRole.ADMIN), validate({ params: idParamSchema }), getById);
 
 /**
  * @swagger
@@ -63,6 +63,6 @@ router.get('/:id', authorize(UserRole.ADMIN), validate({ params: idParamSchema }
  *       200:
  *         description: User status updated
  */
-router.patch('/:id/status', authorize(UserRole.ADMIN), validate({ params: idParamSchema, body: contractorStatusSchema }), updateUserStatus);
+router.patch('/:id/status', authorize(UserRole.ADMIN), validate({ params: idParamSchema }), updateStatus);
 
 export default router;
