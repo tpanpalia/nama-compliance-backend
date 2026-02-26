@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { UserRole } from '@prisma/client';
-import { getDashboardStats } from '../controllers/stats.controller';
+import { dashboard } from '../controllers/stats.controller';
 import { authorize } from '../middleware/authorize';
 import { EXTERNAL_USER_ROLES } from '../types/roles';
 
@@ -19,6 +19,6 @@ const router = Router();
  *       200:
  *         description: Dashboard stats for the requesting user's role
  */
-router.get('/dashboard', authorize(UserRole.ADMIN, UserRole.INSPECTOR, EXTERNAL_USER_ROLES.CONTRACTOR, EXTERNAL_USER_ROLES.REGULATOR), getDashboardStats);
+router.get('/dashboard', authorize(UserRole.ADMIN, UserRole.INSPECTOR, EXTERNAL_USER_ROLES.CONTRACTOR, EXTERNAL_USER_ROLES.REGULATOR), dashboard);
 
 export default router;
