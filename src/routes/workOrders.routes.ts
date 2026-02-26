@@ -25,6 +25,7 @@ const router = Router();
  * /api/v1/work-orders:
  *   get:
  *     summary: List work orders (role-scoped)
+ *     description: ADMIN and REGULATOR see all work orders. INSPECTOR sees assigned + pool. CONTRACTOR sees only their own.
  *     tags: [Work Orders]
  *     security:
  *       - BearerAuth: []
@@ -46,7 +47,7 @@ const router = Router();
  *       401:
  *         description: Unauthorized
  */
-router.get('/', authorize(UserRole.ADMIN, UserRole.INSPECTOR, EXTERNAL_USER_ROLES.REGULATOR), validate({ query: workOrderFilterSchema }), getWorkOrders);
+router.get('/', authorize(UserRole.ADMIN, UserRole.INSPECTOR, EXTERNAL_USER_ROLES.CONTRACTOR, EXTERNAL_USER_ROLES.REGULATOR), validate({ query: workOrderFilterSchema }), getWorkOrders);
 
 /**
  * @swagger

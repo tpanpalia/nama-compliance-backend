@@ -23,6 +23,8 @@ import accessRequestsRouter from './routes/accessRequests.routes';
 import scoringRouter from './routes/scoring.routes';
 import statsRouter from './routes/stats.routes';
 import reportsRouter from './routes/reports.routes';
+import regulatorsRouter from './routes/regulators.routes';
+import { prisma } from './config/database';
 
 const app = express();
 
@@ -51,6 +53,65 @@ app.use(
   })
 );
 
+if (process.env.NODE_ENV !== 'production') {
+  app.use((req, _res, next) => {
+    const requestedRole = typeof req.query._role === 'string' ? req.query._role.toLowerCase() : '';
+    const roles: Record<string, any> = {
+      admin: {
+        oid: 'dev-admin-001',
+        email: 'admin@nama.om',
+        displayName: 'Dev Admin',
+        role: 'ADMIN',
+        isExternal: false,
+      },
+      inspector: {
+        oid: 'dev-inspector-001',
+        email: 'inspector@nama.om',
+        displayName: 'Dev Inspector',
+        role: 'INSPECTOR',
+        isExternal: false,
+      },
+      contractor: {
+        oid: 'dev-contractor-001',
+        email: 'contractor@test.com',
+        displayName: 'Dev Contractor',
+        role: 'CONTRACTOR',
+        isExternal: true,
+      },
+      regulator: {
+        oid: 'dev-regulator-001',
+        email: 'regulator@apsr.om',
+        displayName: 'Dev Regulator',
+        role: 'REGULATOR',
+        isExternal: true,
+      },
+    };
+
+    const applyRole = async () => {
+      if (requestedRole && roles[requestedRole]) {
+        req.user = {
+          ...roles[requestedRole],
+          dbUserId: roles[requestedRole].oid,
+        };
+        const activeUser = req.user!;
+
+        if (!activeUser.isExternal) {
+          const user = await prisma.user.findFirst({ where: { email: activeUser.email } });
+          if (user) activeUser.dbUserId = user.id;
+        } else if (activeUser.role === 'CONTRACTOR') {
+          const contractor = await prisma.contractor.findFirst({ where: { email: activeUser.email } });
+          if (contractor) activeUser.dbUserId = contractor.id;
+        } else if (activeUser.role === 'REGULATOR') {
+          const regulator = await prisma.regulator.findFirst({ where: { email: activeUser.email } });
+          if (regulator) activeUser.dbUserId = regulator.id;
+        }
+      }
+    };
+
+    applyRole().then(() => next()).catch(next);
+  });
+}
+
 app.get('/health', (_req, res) => {
   res.json({
     status: 'ok',
@@ -72,6 +133,7 @@ app.use('/api/v1/users', authenticate, usersRouter);
 app.use('/api/v1/scoring', authenticate, scoringRouter);
 app.use('/api/v1/stats', authenticate, statsRouter);
 app.use('/api/v1/reports', authenticate, reportsRouter);
+app.use('/api/v1/regulators', authenticate, regulatorsRouter);
 
 app.use((_req, res) => {
   res.status(404).json({ error: 'Route not found' });

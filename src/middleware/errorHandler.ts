@@ -2,6 +2,7 @@ import { NextFunction, Request, Response } from 'express';
 import { Prisma } from '@prisma/client';
 import { ZodError } from 'zod';
 import logger from '../config/logger';
+import { AppError } from '../utils/AppError';
 
 export const errorHandler = (err: unknown, _req: Request, res: Response, _next: NextFunction): void => {
   if (err instanceof ZodError) {
@@ -25,6 +26,11 @@ export const errorHandler = (err: unknown, _req: Request, res: Response, _next: 
       res.status(400).json({ error: 'Bad request', details: err.meta });
       return;
     }
+  }
+
+  if (err instanceof AppError) {
+    res.status(err.status).json({ error: err.message });
+    return;
   }
 
   const message = err instanceof Error ? err.message : 'Internal server error';

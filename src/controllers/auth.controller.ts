@@ -68,6 +68,34 @@ export const login = async (req: Request, res: Response) => {
       });
     }
 
+    const regulator = await prisma.regulator.findUnique({ where: { email } });
+    if (regulator) {
+      if (!regulator.isActive) {
+        return res.status(403).json({ error: 'Account is deactivated' });
+      }
+      const valid = await bcrypt.compare(password, regulator.password);
+      if (!valid) {
+        return res.status(401).json({ error: 'Invalid email or password' });
+      }
+      const token = signToken({
+        userId: regulator.id,
+        email: regulator.email,
+        role: 'REGULATOR',
+        isExternal: true,
+      });
+      return res.json({
+        token,
+        user: {
+          id: regulator.id,
+          email: regulator.email,
+          displayName: regulator.displayName,
+          role: 'REGULATOR',
+          organisation: regulator.organisation,
+          isExternal: true,
+        },
+      });
+    }
+
     return res.status(401).json({ error: 'Invalid email or password' });
   } catch (err) {
     return res.status(500).json({ error: 'Internal server error' });
@@ -77,20 +105,29 @@ export const login = async (req: Request, res: Response) => {
 export const getMe = async (req: Request, res: Response) => {
   try {
     if (!req.user) return res.status(401).json({ error: 'Unauthorized' });
+    const role = req.user.role;
 
-    if (!req.user.isExternal) {
-      const user = await prisma.user.findUnique({
-        where: { id: req.user.dbUserId },
-        select: { id: true, email: true, displayName: true, role: true, isActive: true, createdAt: true },
-      });
-      return res.json({ data: user });
-    } else {
+    if (role === 'CONTRACTOR') {
       const contractor = await prisma.contractor.findUnique({
         where: { id: req.user.dbUserId },
         select: { id: true, email: true, companyName: true, contractorId: true, isActive: true, createdAt: true },
       });
       return res.json({ data: { ...contractor, role: 'CONTRACTOR' } });
     }
+
+    if (role === 'REGULATOR') {
+      const regulator = await prisma.regulator.findUnique({
+        where: { id: req.user.dbUserId },
+        select: { id: true, email: true, displayName: true, organisation: true, isActive: true, createdAt: true },
+      });
+      return res.json({ data: { ...regulator, role: 'REGULATOR' } });
+    }
+
+    const user = await prisma.user.findUnique({
+      where: { id: req.user.dbUserId },
+      select: { id: true, email: true, displayName: true, role: true, isActive: true, createdAt: true },
+    });
+    return res.json({ data: user });
   } catch (err) {
     return res.status(500).json({ error: 'Internal server error' });
   }

@@ -1,6 +1,32 @@
 import { NextFunction, Request, Response } from 'express';
 import { prisma } from '../config/database';
 
+type TrendRow = { month: Date; avgScore: number | null };
+type TopContractorRow = {
+  contractorId: string;
+  companyName: string;
+  avgScore: number | null;
+  totalInspections: number;
+};
+
+const getComplianceTrend = async (): Promise<Array<{ month: string; score: number }>> => {
+  const trendRows = await prisma.$queryRaw<TrendRow[]>`
+    SELECT date_trunc('month', "approvedAt") AS "month",
+           AVG("overallScore") AS "avgScore"
+    FROM "WorkOrder"
+    WHERE "status" = 'APPROVED'
+      AND "overallScore" IS NOT NULL
+      AND "approvedAt" >= date_trunc('month', CURRENT_DATE) - INTERVAL '5 months'
+    GROUP BY date_trunc('month', "approvedAt")
+    ORDER BY date_trunc('month', "approvedAt") ASC
+  `;
+
+  return trendRows.map((row) => ({
+    month: row.month.toISOString().slice(0, 7),
+    score: Number(row.avgScore || 0),
+  }));
+};
+
 export const getDashboardStats = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const role = req.user?.role;
@@ -9,16 +35,11 @@ export const getDashboardStats = async (req: Request, res: Response, next: NextF
       const [totalWOs, activeContractors, avg, pendingReviews] = await Promise.all([
         prisma.workOrder.count(),
         prisma.contractor.count({ where: { isActive: true } }),
-        prisma.workOrder.aggregate({ _avg: { overallScore: true } }),
+        prisma.workOrder.aggregate({ where: { status: 'APPROVED' }, _avg: { overallScore: true } }),
         prisma.workOrder.count({ where: { status: 'SUBMITTED' } }),
       ]);
 
-      const monthly = await prisma.workOrder.findMany({
-        where: { createdAt: { gte: new Date(new Date().setMonth(new Date().getMonth() - 5)) } },
-        select: { createdAt: true, overallScore: true },
-      });
-
-      const monthlyTrend = monthly.map((m) => ({ month: m.createdAt.toISOString().slice(0, 7), score: m.overallScore || 0 }));
+      const monthlyTrend = await getComplianceTrend();
 
       res.json({
         data: {
@@ -28,6 +49,45 @@ export const getDashboardStats = async (req: Request, res: Response, next: NextF
           pendingReviews,
           monthlyTrend,
           complianceByCategory: {},
+        },
+        message: 'Dashboard stats fetched successfully',
+      });
+      return;
+    }
+
+    if (role === 'REGULATOR') {
+      const [systemTotal, systemAvgComplianceResult, complianceTrend, topContractors, pendingReviews] = await Promise.all([
+        prisma.workOrder.count(),
+        prisma.workOrder.aggregate({ where: { status: 'APPROVED' }, _avg: { overallScore: true } }),
+        getComplianceTrend(),
+        prisma.$queryRaw<TopContractorRow[]>`
+          SELECT c."contractorId",
+                 c."companyName",
+                 AVG(w."overallScore") AS "avgScore",
+                 COUNT(w."id")::int AS "totalInspections"
+          FROM "Contractor" c
+          JOIN "WorkOrder" w ON w."contractorId" = c."id"
+          WHERE w."status" = 'APPROVED'
+            AND w."overallScore" IS NOT NULL
+          GROUP BY c."contractorId", c."companyName"
+          ORDER BY AVG(w."overallScore") DESC
+          LIMIT 5
+        `,
+        prisma.workOrder.count({ where: { status: 'SUBMITTED' } }),
+      ]);
+
+      res.json({
+        data: {
+          systemTotal,
+          systemAvgCompliance: systemAvgComplianceResult._avg.overallScore || 0,
+          complianceTrend,
+          topContractors: topContractors.map((row) => ({
+            contractorId: row.contractorId,
+            companyName: row.companyName,
+            avgScore: Number(row.avgScore || 0),
+            totalInspections: row.totalInspections,
+          })),
+          pendingReviews,
         },
         message: 'Dashboard stats fetched successfully',
       });
@@ -56,32 +116,7 @@ export const getDashboardStats = async (req: Request, res: Response, next: NextF
       return;
     }
 
-    const [systemTotalWOs, systemAvg] = await Promise.all([
-      prisma.workOrder.count(),
-      prisma.workOrder.aggregate({ _avg: { overallScore: true } }),
-    ]);
-
-    const topContractors = await prisma.contractor.findMany({
-      take: 5,
-      orderBy: { createdAt: 'desc' },
-      select: { id: true, contractorId: true, companyName: true },
-    });
-
-    const complianceTrend = await prisma.workOrder.findMany({
-      take: 6,
-      orderBy: { createdAt: 'desc' },
-      select: { createdAt: true, overallScore: true },
-    });
-
-    res.json({
-      data: {
-        systemTotalWOs,
-        systemAvgCompliance: systemAvg._avg.overallScore || 0,
-        topContractors,
-        complianceTrend: complianceTrend.map((x) => ({ month: x.createdAt.toISOString().slice(0, 7), score: x.overallScore || 0 })),
-      },
-      message: 'Dashboard stats fetched successfully',
-    });
+    res.status(403).json({ error: 'Forbidden' });
   } catch (error) {
     next(error);
   }

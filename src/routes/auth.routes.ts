@@ -1,4 +1,4 @@
-import { Router } from 'express';
+﻿import { Router } from 'express';
 import { login, getMe } from '../controllers/auth.controller';
 import { authenticate } from '../middleware/authenticate';
 
@@ -9,7 +9,7 @@ const router = Router();
  * /api/v1/auth/login:
  *   post:
  *     summary: Login with email and password
- *     description: Checks User table first (INSPECTOR/ADMIN), then Contractor table (CONTRACTOR). Returns JWT token and user info with role.
+ *     description: Checks User table (INSPECTOR/ADMIN), then Contractor (CONTRACTOR), then Regulator (REGULATOR). Returns JWT token and user info with role.
  *     tags: [Auth]
  *     requestBody:
  *       required: true
@@ -28,7 +28,7 @@ const router = Router();
  *                 example: password123
  *     responses:
  *       200:
- *         description: Login successful � returns token and user with role
+ *         description: Login successful — returns token and user with role
  *         content:
  *           application/json:
  *             schema:
@@ -42,7 +42,7 @@ const router = Router();
  *                     id:          { type: string }
  *                     email:       { type: string }
  *                     displayName: { type: string }
- *                     role:        { type: string, enum: [ADMIN, INSPECTOR, CONTRACTOR] }
+ *                     role:        { type: string, enum: [ADMIN, INSPECTOR, CONTRACTOR, REGULATOR] }
  *                     isExternal:  { type: boolean }
  *       401:
  *         description: Invalid email or password
@@ -69,3 +69,4 @@ router.post('/login', login);
 router.get('/me', authenticate, getMe);
 
 export default router;
+

@@ -45,6 +45,21 @@ model Contractor {
   @@index([isActive])
 }
 
+model Regulator {
+  id           String   @id @default(uuid())
+  email        String   @unique
+  password     String
+  displayName  String
+  organisation String
+  department   String?
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([email])
+  @@index([isActive])
+}
+
 model Site {
   id         String      @id @default(dbgenerated("(gen_random_uuid())::text"))
   name       String
@@ -241,11 +256,6 @@ model ScoringConfig {
 enum UserRole {
   INSPECTOR
   ADMIN
-}
-
-enum ExternalUserRole {
-  CONTRACTOR
-  REGULATOR
 }
 
 enum WorkOrderStatus {

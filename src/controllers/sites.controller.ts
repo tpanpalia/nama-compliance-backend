@@ -1,46 +1,51 @@
-import { NextFunction, Request, Response } from 'express';
+import { Request, Response, NextFunction } from 'express';
 import { prisma } from '../config/database';
+import * as SitesService from '../services/sites.service';
+import { CreateSiteSchema, UpdateSiteSchema } from '../services/sites.service';
 
-export const listSites = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+export const list = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { region, isActive } = req.query as Record<string, string>;
-    const data = await prisma.site.findMany({
-      where: {
-        ...(region ? { region } : {}),
-        ...(typeof isActive === 'string' ? { isActive: isActive === 'true' } : {}),
-      },
-      orderBy: { name: 'asc' },
-    });
-    res.json({ data, message: 'Sites fetched successfully' });
-  } catch (error) {
-    next(error);
+    const region = req.query.region as string | undefined;
+    const isActive = req.query.isActive !== undefined ? req.query.isActive === 'true' : undefined;
+    const data = await SitesService.listSites({ region, isActive });
+    res.json({ data });
+  } catch (err) {
+    next(err);
   }
 };
 
-export const getSiteById = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+export const getById = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const data = await prisma.site.findUniqueOrThrow({ where: { id: req.params.id } });
-    res.json({ data, message: 'Site fetched successfully' });
-  } catch (error) {
-    next(error);
+    const data = await SitesService.getSiteById(req.params.id);
+    res.json({ data });
+  } catch (err) {
+    next(err);
   }
 };
 
-export const createSite = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+export const create = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const data = await prisma.site.create({ data: req.body });
-    res.status(201).json({ data, message: 'Site created successfully' });
-  } catch (error) {
-    next(error);
+    const parsed = CreateSiteSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ error: 'Validation failed', details: parsed.error.flatten().fieldErrors });
+    }
+    const data = await SitesService.createSite(parsed.data);
+    res.status(201).json({ data });
+  } catch (err) {
+    next(err);
   }
 };
 
-export const updateSite = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+export const update = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const data = await prisma.site.update({ where: { id: req.params.id }, data: req.body });
-    res.json({ data, message: 'Site updated successfully' });
-  } catch (error) {
-    next(error);
+    const parsed = UpdateSiteSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ error: 'Validation failed', details: parsed.error.flatten().fieldErrors });
+    }
+    const data = await SitesService.updateSite(req.params.id, parsed.data);
+    res.json({ data });
+  } catch (err) {
+    next(err);
   }
 };
 
@@ -56,7 +61,7 @@ const haversineKm = (lat1: number, lon1: number, lat2: number, lon2: number): nu
   return R * c;
 };
 
-export const nearbySites = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+export const nearbySites = async (req: Request, res: Response): Promise<void> => {
   try {
     const latitude = Number(req.query.latitude);
     const longitude = Number(req.query.longitude);
@@ -65,8 +70,8 @@ export const nearbySites = async (req: Request, res: Response, next: NextFunctio
     const sites = await prisma.site.findMany({ where: { isActive: true } });
     const data = sites.filter((site) => haversineKm(latitude, longitude, site.latitude, site.longitude) <= radiusKm);
 
-    res.json({ data, message: 'Nearby sites fetched successfully' });
-  } catch (error) {
-    next(error);
+    res.status(200).json({ data });
+  } catch {
+    res.status(500).json({ error: 'Internal server error' });
   }
 };

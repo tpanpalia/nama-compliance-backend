@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { UserRole } from '@prisma/client';
-import { createSite, getSiteById, listSites, nearbySites, updateSite } from '../controllers/sites.controller';
+import { create, getById, list, nearbySites, update } from '../controllers/sites.controller';
 import { authorize } from '../middleware/authorize';
 import { validate } from '../middleware/validate';
 import { idParamSchema } from '../schemas/common.schema';
@@ -27,7 +27,7 @@ const router = Router();
  *       200:
  *         description: List of sites
  */
-router.get('/', authorize(UserRole.ADMIN, UserRole.INSPECTOR, EXTERNAL_USER_ROLES.CONTRACTOR, EXTERNAL_USER_ROLES.REGULATOR), listSites);
+router.get('/', authorize(UserRole.ADMIN, UserRole.INSPECTOR, EXTERNAL_USER_ROLES.CONTRACTOR, EXTERNAL_USER_ROLES.REGULATOR), list);
 router.get('/nearby', authorize(EXTERNAL_USER_ROLES.CONTRACTOR), nearbySites);
 
 /**
@@ -49,7 +49,7 @@ router.get('/nearby', authorize(EXTERNAL_USER_ROLES.CONTRACTOR), nearbySites);
  *       404:
  *         description: Not found
  */
-router.get('/:id', authorize(UserRole.ADMIN, UserRole.INSPECTOR, EXTERNAL_USER_ROLES.CONTRACTOR, EXTERNAL_USER_ROLES.REGULATOR), validate({ params: idParamSchema }), getSiteById);
+router.get('/:id', authorize(UserRole.ADMIN, UserRole.INSPECTOR, EXTERNAL_USER_ROLES.CONTRACTOR, EXTERNAL_USER_ROLES.REGULATOR), validate({ params: idParamSchema }), getById);
 
 /**
  * @swagger
@@ -76,7 +76,7 @@ router.get('/:id', authorize(UserRole.ADMIN, UserRole.INSPECTOR, EXTERNAL_USER_R
  *       201:
  *         description: Site created
  */
-router.post('/', authorize(UserRole.ADMIN), createSite);
-router.patch('/:id', authorize(UserRole.ADMIN), validate({ params: idParamSchema }), updateSite);
+router.post('/', authorize(UserRole.ADMIN), create);
+router.patch('/:id', authorize(UserRole.ADMIN), validate({ params: idParamSchema }), update);
 
 export default router;

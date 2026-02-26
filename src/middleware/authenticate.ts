@@ -3,6 +3,10 @@ import { verifyToken } from '../config/auth';
 
 export const authenticate = (req: Request, res: Response, next: NextFunction) => {
   try {
+    if (req.user) {
+      return next();
+    }
+
     const authHeader = req.headers.authorization;
 
     if (!authHeader || !authHeader.startsWith('Bearer ')) {

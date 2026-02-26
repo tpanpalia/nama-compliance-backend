@@ -45,6 +45,18 @@ async function main(): Promise<void> {
     },
   });
 
+  await prisma.regulator.upsert({
+    where: { email: 'regulator@apsr.om' },
+    update: {},
+    create: {
+      email: 'regulator@apsr.om',
+      password: hash,
+      displayName: 'APSR Regulator',
+      organisation: 'APSR',
+      department: 'Water Services Regulation',
+    },
+  });
+
   const site1 = await prisma.site.upsert({
     where: { id: '11111111-1111-1111-1111-111111111111' },
     update: {},

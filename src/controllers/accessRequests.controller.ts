@@ -1,5 +1,6 @@
 import { NextFunction, Request, Response } from 'express';
 import { AccessRequestStatus } from '@prisma/client';
+import bcrypt from 'bcryptjs';
 import { prisma } from '../config/database';
 import { generateContractorId } from '../types';
 
@@ -36,16 +37,17 @@ export const approveAccessRequest = async (req: Request, res: Response, next: Ne
     const accessRequest = await prisma.accessRequest.findUniqueOrThrow({ where: { id: req.params.id } });
     const contractorCount = await prisma.contractor.count();
     const contractorId = generateContractorId(contractorCount + 1);
+    const passwordHash = await bcrypt.hash(req.body.password || 'Welcome@123', 10);
 
     const contractor = await prisma.contractor.create({
       data: {
         contractorId,
-        b2cOid: `pending-b2c-${Date.now()}`,
         companyName: accessRequest.companyName,
         tradeLicense: accessRequest.tradeLicense,
         crNumber: accessRequest.crNumber,
         contactName: accessRequest.contactName,
         email: accessRequest.email,
+        password: passwordHash,
         phone: accessRequest.phone,
         isActive: true,
       },
