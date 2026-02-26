@@ -1,3 +1,4 @@
+import bcrypt from 'bcryptjs';
 import { PrismaClient, UserRole, WorkOrderPriority, WorkOrderStatus } from '@prisma/client';
 
 const prisma = new PrismaClient();
@@ -10,35 +11,36 @@ const DEFAULT_SCORING_WEIGHTS = {
 };
 
 async function main(): Promise<void> {
+  const hash = await bcrypt.hash('password123', 10);
+
   const admin = await prisma.user.upsert({
     where: { email: 'admin@nama.om' },
-    update: {},
+    update: {
+      password: hash,
+      displayName: 'Ahmed Al-Busaidi',
+      role: UserRole.ADMIN,
+      isActive: true,
+    },
     create: {
-      azureAdOid: '00000000-0000-0000-0000-000000000001',
       email: 'admin@nama.om',
-      displayName: 'NAMA Admin',
+      password: hash,
+      displayName: 'Ahmed Al-Busaidi',
       role: UserRole.ADMIN,
     },
   });
 
-  const inspector1 = await prisma.user.upsert({
-    where: { email: 'inspector1@nama.om' },
-    update: {},
-    create: {
-      azureAdOid: '00000000-0000-0000-0000-000000000002',
-      email: 'inspector1@nama.om',
-      displayName: 'Inspector One',
+  const inspector = await prisma.user.upsert({
+    where: { email: 'inspector@nama.om' },
+    update: {
+      password: hash,
+      displayName: 'Mohammed Al-Balushi',
       role: UserRole.INSPECTOR,
+      isActive: true,
     },
-  });
-
-  const inspector2 = await prisma.user.upsert({
-    where: { email: 'inspector2@nama.om' },
-    update: {},
     create: {
-      azureAdOid: '00000000-0000-0000-0000-000000000003',
-      email: 'inspector2@nama.om',
-      displayName: 'Inspector Two',
+      email: 'inspector@nama.om',
+      password: hash,
+      displayName: 'Mohammed Al-Balushi',
       role: UserRole.INSPECTOR,
     },
   });
@@ -151,33 +153,27 @@ async function main(): Promise<void> {
     create: { name: 'default', weights: DEFAULT_SCORING_WEIGHTS, updatedBy: admin.id },
   });
 
-  const contractor1 = await prisma.contractor.upsert({
-    where: { email: 'ops@contractora.om' },
-    update: {},
+  const contractor = await prisma.contractor.upsert({
+    where: { email: 'contractor@test.com' },
+    update: {
+      password: hash,
+      contractorId: 'C-00001',
+      companyName: 'Al Noor Construction',
+      tradeLicense: 'TL-001',
+      crNumber: 'CR-001',
+      contactName: 'Ali Al-Rashdi',
+      phone: '+96891234567',
+      isActive: true,
+    },
     create: {
       contractorId: 'C-00001',
-      b2cOid: 'b2c-oid-contractor-1',
-      companyName: 'Contractor A LLC',
-      tradeLicense: 'TL-1001',
-      crNumber: 'CR-1001',
-      contactName: 'Ahmed Ali',
-      email: 'ops@contractora.om',
-      phone: '+96890000001',
-    },
-  });
-
-  const contractor2 = await prisma.contractor.upsert({
-    where: { email: 'ops@contractorb.om' },
-    update: {},
-    create: {
-      contractorId: 'C-00002',
-      b2cOid: 'b2c-oid-contractor-2',
-      companyName: 'Contractor B LLC',
-      tradeLicense: 'TL-1002',
-      crNumber: 'CR-1002',
-      contactName: 'Fatima Khan',
-      email: 'ops@contractorb.om',
-      phone: '+96890000002',
+      companyName: 'Al Noor Construction',
+      tradeLicense: 'TL-001',
+      crNumber: 'CR-001',
+      contactName: 'Ali Al-Rashdi',
+      email: 'contractor@test.com',
+      password: hash,
+      phone: '+96891234567',
     },
   });
 
@@ -205,8 +201,8 @@ async function main(): Promise<void> {
       status: WorkOrderStatus.IN_PROGRESS,
       priority: WorkOrderPriority.CRITICAL,
       siteId: site2.id,
-      contractorId: contractor1.id,
-      inspectorId: inspector1.id,
+      contractorId: contractor.id,
+      inspectorId: inspector.id,
       createdById: admin.id,
       startedAt: new Date(),
     },
@@ -222,8 +218,8 @@ async function main(): Promise<void> {
       status: WorkOrderStatus.SUBMITTED,
       priority: WorkOrderPriority.MEDIUM,
       siteId: site3.id,
-      contractorId: contractor2.id,
-      inspectorId: inspector2.id,
+      contractorId: contractor.id,
+      inspectorId: inspector.id,
       createdById: admin.id,
       submittedAt: new Date(),
       overallScore: 84,

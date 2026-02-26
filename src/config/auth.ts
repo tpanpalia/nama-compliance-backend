@@ -1,26 +1,19 @@
-import jwksRsa from 'jwks-rsa';
+import jwt from 'jsonwebtoken';
 
-export const azureAdJwksClient = jwksRsa({
-  jwksUri: process.env.AZURE_AD_JWKS_URI || '',
-  cache: true,
-  rateLimit: true,
-  jwksRequestsPerMinute: 5,
-});
+export const JWT_SECRET = process.env.JWT_SECRET || 'dev_secret_change_me';
+export const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '24h';
 
-export const azureB2cJwksClient = jwksRsa({
-  jwksUri: process.env.AZURE_B2C_JWKS_URI || '',
-  cache: true,
-  rateLimit: true,
-  jwksRequestsPerMinute: 5,
-});
+export interface JwtPayload {
+  userId: string;
+  email: string;
+  role: string;
+  isExternal: boolean;
+}
 
-export const AUTH_CONFIG = {
-  azureAd: {
-    issuer: process.env.AZURE_AD_ISSUER || '',
-    audience: process.env.AZURE_AD_CLIENT_ID || '',
-  },
-  azureB2c: {
-    issuer: process.env.AZURE_B2C_ISSUER || '',
-    audience: process.env.AZURE_B2C_CLIENT_ID || '',
-  },
+export const signToken = (payload: JwtPayload): string => {
+  return jwt.sign(payload, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN } as any);
+};
+
+export const verifyToken = (token: string): JwtPayload => {
+  return jwt.verify(token, JWT_SECRET) as JwtPayload;
 };

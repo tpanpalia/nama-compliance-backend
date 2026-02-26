@@ -62,18 +62,16 @@ app.get('/health', (_req, res) => {
 app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
 
 app.use('/api/v1/access-requests', accessRequestsRouter);
-
-app.use('/api/v1', authenticate);
 app.use('/api/v1/auth', authRouter);
-app.use('/api/v1/work-orders', workOrdersRouter);
-app.use('/api/v1/evidence', evidenceRouter);
-app.use('/api/v1/checklists', checklistsRouter);
-app.use('/api/v1/contractors', contractorsRouter);
-app.use('/api/v1/sites', sitesRouter);
-app.use('/api/v1/users', usersRouter);
-app.use('/api/v1/scoring', scoringRouter);
-app.use('/api/v1/stats', statsRouter);
-app.use('/api/v1/reports', reportsRouter);
+app.use('/api/v1/work-orders', authenticate, workOrdersRouter);
+app.use('/api/v1/evidence', authenticate, evidenceRouter);
+app.use('/api/v1/checklists', authenticate, checklistsRouter);
+app.use('/api/v1/contractors', authenticate, contractorsRouter);
+app.use('/api/v1/sites', authenticate, sitesRouter);
+app.use('/api/v1/users', authenticate, usersRouter);
+app.use('/api/v1/scoring', authenticate, scoringRouter);
+app.use('/api/v1/stats', authenticate, statsRouter);
+app.use('/api/v1/reports', authenticate, reportsRouter);
 
 app.use((_req, res) => {
   res.status(404).json({ error: 'Route not found' });

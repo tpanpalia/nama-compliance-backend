@@ -7,7 +7,236 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// --- ENUMS --------------------------------------------------------------------
+model User {
+  id                 String      @id @default(dbgenerated("(gen_random_uuid())::text"))
+  email              String      @unique
+  password           String
+  displayName        String
+  role               UserRole
+  isActive           Boolean     @default(true)
+  createdAt          DateTime    @default(now()) @db.Timestamptz(6)
+  updatedAt          DateTime    @default(now()) @updatedAt @db.Timestamptz(6)
+  assignedWorkOrders WorkOrder[] @relation("InspectorWorkOrders")
+  createdWorkOrders  WorkOrder[] @relation("CreatorWorkOrders")
+  approvedWorkOrders WorkOrder[] @relation("ApproverWorkOrders")
+  auditLogs          AuditLog[]
+
+  @@index([email])
+  @@index([role])
+}
+
+model Contractor {
+  id            String         @id @default(dbgenerated("(gen_random_uuid())::text"))
+  contractorId  String         @unique
+  companyName   String
+  tradeLicense  String
+  crNumber      String
+  contactName   String
+  email         String         @unique
+  password      String
+  phone         String
+  isActive      Boolean        @default(true)
+  createdAt     DateTime       @default(now()) @db.Timestamptz(6)
+  updatedAt     DateTime       @default(now()) @updatedAt @db.Timestamptz(6)
+  workOrders    WorkOrder[]
+  accessRequest AccessRequest?
+
+  @@index([contractorId])
+  @@index([isActive])
+}
+
+model Site {
+  id         String      @id @default(dbgenerated("(gen_random_uuid())::text"))
+  name       String
+  location   String
+  latitude   Float
+  longitude  Float
+  region     String
+  isActive   Boolean     @default(true)
+  createdAt  DateTime    @default(now()) @db.Timestamptz(6)
+  updatedAt  DateTime    @default(now()) @updatedAt @db.Timestamptz(6)
+  workOrders WorkOrder[]
+
+  @@index([isActive])
+  @@index([region])
+}
+
+model WorkOrder {
+  id              String              @id @default(dbgenerated("(gen_random_uuid())::text"))
+  reference       String              @unique
+  title           String
+  description     String?
+  status          WorkOrderStatus     @default(PENDING)
+  priority        WorkOrderPriority   @default(MEDIUM)
+  scheduledDate   DateTime?           @db.Timestamptz(6)
+  startedAt       DateTime?           @db.Timestamptz(6)
+  submittedAt     DateTime?           @db.Timestamptz(6)
+  approvedAt      DateTime?           @db.Timestamptz(6)
+  isLocked        Boolean             @default(false)
+  overallScore    Float?
+  complianceBand  ComplianceBand?
+  rejectionReason String?
+  siteId          String
+  contractorId    String?
+  inspectorId     String?
+  createdById     String
+  approvedById    String?
+  createdAt       DateTime            @default(now()) @db.Timestamptz(6)
+  updatedAt       DateTime            @default(now()) @updatedAt @db.Timestamptz(6)
+  auditLogs       AuditLog[]
+  evidence        Evidence[]
+  approvedBy      User?               @relation("ApproverWorkOrders", fields: [approvedById], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  contractor      Contractor?         @relation(fields: [contractorId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  createdBy       User                @relation("CreatorWorkOrders", fields: [createdById], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  inspector       User?               @relation("InspectorWorkOrders", fields: [inspectorId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  site            Site                @relation(fields: [siteId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  checklist       WorkOrderChecklist?
+
+  @@index([status])
+  @@index([inspectorId])
+  @@index([contractorId])
+  @@index([siteId])
+  @@index([reference])
+  @@index([scheduledDate])
+}
+
+model ChecklistTemplate {
+  id          String             @id @default(dbgenerated("(gen_random_uuid())::text"))
+  name        String
+  description String?
+  isActive    Boolean            @default(true)
+  version     Int                @default(1)
+  createdAt   DateTime           @default(now()) @db.Timestamptz(6)
+  updatedAt   DateTime           @default(now()) @updatedAt @db.Timestamptz(6)
+  sections    ChecklistSection[]
+
+  @@index([isActive])
+}
+
+model ChecklistSection {
+  id         String            @id @default(dbgenerated("(gen_random_uuid())::text"))
+  name       String
+  weight     Float
+  order      Int
+  templateId String
+  items      ChecklistItem[]
+  template   ChecklistTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([templateId])
+  @@index([order])
+}
+
+model ChecklistItem {
+  id         String              @id @default(dbgenerated("(gen_random_uuid())::text"))
+  text       String
+  isRequired Boolean             @default(true)
+  order      Int
+  sectionId  String
+  section    ChecklistSection    @relation(fields: [sectionId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  responses  ChecklistResponse[]
+
+  @@index([sectionId])
+  @@index([order])
+}
+
+model WorkOrderChecklist {
+  id                 String              @id @default(dbgenerated("(gen_random_uuid())::text"))
+  workOrderId        String              @unique
+  isSubmitted        Boolean             @default(false)
+  submittedAt        DateTime?           @db.Timestamptz(6)
+  lastSavedAt        DateTime?           @db.Timestamptz(6)
+  submittedLatitude  Float?
+  submittedLongitude Float?
+  createdAt          DateTime            @default(now()) @db.Timestamptz(6)
+  updatedAt          DateTime            @default(now()) @updatedAt @db.Timestamptz(6)
+  responses          ChecklistResponse[]
+  workOrder          WorkOrder           @relation(fields: [workOrderId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+}
+
+model ChecklistResponse {
+  id          String             @id @default(dbgenerated("(gen_random_uuid())::text"))
+  checklistId String
+  itemId      String
+  rating      RatingValue?
+  comment     String?
+  createdAt   DateTime           @default(now()) @db.Timestamptz(6)
+  updatedAt   DateTime           @default(now()) @updatedAt @db.Timestamptz(6)
+  checklist   WorkOrderChecklist @relation(fields: [checklistId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  item        ChecklistItem      @relation(fields: [itemId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@unique([checklistId, itemId])
+  @@index([checklistId])
+  @@index([rating])
+}
+
+model Evidence {
+  id          String         @id @default(dbgenerated("(gen_random_uuid())::text"))
+  workOrderId String
+  type        EvidenceType
+  source      EvidenceSource
+  s3Key       String
+  s3Bucket    String
+  fileName    String
+  fileSize    Int
+  mimeType    String
+  latitude    Float?
+  longitude   Float?
+  accuracy    Float?
+  capturedAt  DateTime?      @db.Timestamptz(6)
+  uploadedAt  DateTime       @default(now()) @db.Timestamptz(6)
+  workOrder   WorkOrder      @relation(fields: [workOrderId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([workOrderId])
+  @@index([source])
+  @@index([type])
+}
+
+model AuditLog {
+  id          String     @id @default(dbgenerated("(gen_random_uuid())::text"))
+  workOrderId String?
+  userId      String?
+  action      String
+  oldValue    Json?
+  newValue    Json?
+  ipAddress   String?
+  userAgent   String?
+  createdAt   DateTime   @default(now()) @db.Timestamptz(6)
+  user        User?      @relation(fields: [userId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  workOrder   WorkOrder? @relation(fields: [workOrderId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([workOrderId])
+  @@index([userId])
+  @@index([action])
+  @@index([createdAt])
+}
+
+model AccessRequest {
+  id           String              @id @default(dbgenerated("(gen_random_uuid())::text"))
+  companyName  String
+  tradeLicense String
+  crNumber     String
+  contactName  String
+  email        String              @unique
+  phone        String
+  status       AccessRequestStatus @default(PENDING)
+  reviewedAt   DateTime?           @db.Timestamptz(6)
+  reviewNotes  String?
+  contractorId String?             @unique
+  createdAt    DateTime            @default(now()) @db.Timestamptz(6)
+  updatedAt    DateTime            @default(now()) @updatedAt @db.Timestamptz(6)
+  contractor   Contractor?         @relation(fields: [contractorId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([status])
+  @@index([email])
+}
+
+model ScoringConfig {
+  id        String   @id @default(dbgenerated("(gen_random_uuid())::text"))
+  name      String   @unique
+  weights   Json
+  updatedAt DateTime @default(now()) @updatedAt @db.Timestamptz(6)
+  updatedBy String?
+}
 
 enum UserRole {
   INSPECTOR
@@ -37,9 +266,9 @@ enum WorkOrderPriority {
 }
 
 enum RatingValue {
-  COMPLIANT       // 100 points
-  PARTIAL         // 67 points
-  NON_COMPLIANT   // 33 points
+  COMPLIANT
+  PARTIAL
+  NON_COMPLIANT
 }
 
 enum EvidenceType {
@@ -59,294 +288,8 @@ enum AccessRequestStatus {
 }
 
 enum ComplianceBand {
-  EXCELLENT  // 90-100%
-  GOOD       // 70-89%
-  FAIR       // 50-69%
-  POOR       // <50%
-}
-
-// --- MODEL 1: User (internal — inspectors + admins) --------------------------
-
-model User {
-  id            String    @id @default(uuid())
-  azureAdOid    String    @unique  // Azure AD Object ID
-  email         String    @unique
-  displayName   String
-  role          UserRole
-  isActive      Boolean   @default(true)
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
-
-  assignedWorkOrders    WorkOrder[]  @relation("InspectorWorkOrders")
-  createdWorkOrders     WorkOrder[]  @relation("CreatorWorkOrders")
-  approvedWorkOrders    WorkOrder[]  @relation("ApproverWorkOrders")
-  auditLogs             AuditLog[]
-
-  @@index([azureAdOid])
-  @@index([role])
-  @@index([email])
-}
-
-// --- MODEL 2: Contractor -----------------------------------------------------
-
-model Contractor {
-  id               String    @id @default(uuid())
-  contractorId     String    @unique  // C-XXXXX format — assigned on approval
-  b2cOid           String    @unique  // Azure AD B2C Object ID
-  companyName      String
-  tradeLicense     String
-  crNumber         String    // Commercial Registration number
-  contactName      String
-  email            String    @unique
-  phone            String
-  isActive         Boolean   @default(true)
-  createdAt        DateTime  @default(now())
-  updatedAt        DateTime  @updatedAt
-
-  workOrders       WorkOrder[]
-  accessRequest    AccessRequest?
-
-  @@index([contractorId])
-  @@index([b2cOid])
-  @@index([isActive])
-}
-
-// --- MODEL 3: Site ------------------------------------------------------------
-
-model Site {
-  id           String    @id @default(uuid())
-  name         String
-  location     String
-  latitude     Float
-  longitude    Float
-  region       String
-  isActive     Boolean   @default(true)
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
-
-  workOrders   WorkOrder[]
-
-  @@index([isActive])
-  @@index([region])
-}
-
-// --- MODEL 4: WorkOrder -------------------------------------------------------
-
-model WorkOrder {
-  id                String            @id @default(uuid())
-  reference         String            @unique  // INS-YYYY-NNNNN format
-  title             String
-  description       String?
-  status            WorkOrderStatus   @default(PENDING)
-  priority          WorkOrderPriority @default(MEDIUM)
-  scheduledDate     DateTime?
-  startedAt         DateTime?
-  submittedAt       DateTime?
-  approvedAt        DateTime?
-  isLocked          Boolean           @default(false)  // true after approval — immutable
-
-  // Overall compliance scoring (calculated on submission)
-  overallScore      Float?            // 0-100
-  complianceBand    ComplianceBand?
-
-  // Relations
-  siteId            String
-  site              Site              @relation(fields: [siteId], references: [id])
-
-  contractorId      String?
-  contractor        Contractor?       @relation(fields: [contractorId], references: [id])
-
-  inspectorId       String?
-  inspector         User?             @relation("InspectorWorkOrders", fields: [inspectorId], references: [id])
-
-  createdById       String
-  createdBy         User              @relation("CreatorWorkOrders", fields: [createdById], references: [id])
-
-  approvedById      String?
-  approvedBy        User?             @relation("ApproverWorkOrders", fields: [approvedById], references: [id])
-
-  rejectionReason   String?
-
-  checklist         WorkOrderChecklist?
-  evidence          Evidence[]
-  auditLogs         AuditLog[]
-
-  createdAt         DateTime          @default(now())
-  updatedAt         DateTime          @updatedAt
-
-  @@index([status])
-  @@index([inspectorId])
-  @@index([contractorId])
-  @@index([siteId])
-  @@index([reference])
-  @@index([scheduledDate])
-}
-
-// --- MODEL 5: ChecklistTemplate ----------------------------------------------
-
-model ChecklistTemplate {
-  id          String              @id @default(uuid())
-  name        String
-  description String?
-  isActive    Boolean             @default(true)
-  version     Int                 @default(1)
-  createdAt   DateTime            @default(now())
-  updatedAt   DateTime            @updatedAt
-
-  sections    ChecklistSection[]
-
-  @@index([isActive])
-}
-
-// --- MODEL 6: ChecklistSection -----------------------------------------------
-// 4 categories with fixed weights per business rules:
-// HSE & Safety 40% | Technical Installation 30% | Process & Communication 20% | Site Closure 10%
-
-model ChecklistSection {
-  id          String             @id @default(uuid())
-  name        String             // e.g. "HSE & Safety"
-  weight      Float              // e.g. 0.40 — must sum to 1.0 across all sections in template
-  order       Int                // display order
-  templateId  String
-  template    ChecklistTemplate  @relation(fields: [templateId], references: [id], onDelete: Cascade)
-
-  items       ChecklistItem[]
-
-  @@index([templateId])
-  @@index([order])
-}
-
-// --- MODEL 7: ChecklistItem ---------------------------------------------------
-
-model ChecklistItem {
-  id           String           @id @default(uuid())
-  text         String           // The inspection question / requirement
-  isRequired   Boolean          @default(true)
-  order        Int
-  sectionId    String
-  section      ChecklistSection @relation(fields: [sectionId], references: [id], onDelete: Cascade)
-
-  responses    ChecklistResponse[]
-
-  @@index([sectionId])
-  @@index([order])
-}
-
-// --- MODEL 8: WorkOrderChecklist (inspection response record) -----------------
-
-model WorkOrderChecklist {
-  id            String      @id @default(uuid())
-  workOrderId   String      @unique
-  workOrder     WorkOrder   @relation(fields: [workOrderId], references: [id])
-  isSubmitted   Boolean     @default(false)
-  submittedAt   DateTime?
-  lastSavedAt   DateTime?
-
-  // GPS at time of submission (inspector)
-  submittedLatitude  Float?
-  submittedLongitude Float?
-
-  responses     ChecklistResponse[]
-
-  createdAt     DateTime    @default(now())
-  updatedAt     DateTime    @updatedAt
-}
-
-// --- MODEL 9: ChecklistResponse -----------------------------------------------
-
-model ChecklistResponse {
-  id            String              @id @default(uuid())
-  checklistId   String
-  checklist     WorkOrderChecklist  @relation(fields: [checklistId], references: [id])
-  itemId        String
-  item          ChecklistItem       @relation(fields: [itemId], references: [id])
-  rating        RatingValue?        // null = not yet rated
-  comment       String?
-  createdAt     DateTime            @default(now())
-  updatedAt     DateTime            @updatedAt
-
-  @@unique([checklistId, itemId])
-  @@index([checklistId])
-  @@index([rating])
-}
-
-// --- MODEL 10: Evidence -------------------------------------------------------
-
-model Evidence {
-  id            String         @id @default(uuid())
-  workOrderId   String
-  workOrder     WorkOrder      @relation(fields: [workOrderId], references: [id])
-  type          EvidenceType
-  source        EvidenceSource
-  s3Key         String         // S3 object key
-  s3Bucket      String
-  fileName      String
-  fileSize      Int            // bytes
-  mimeType      String
-  // GPS metadata (required for contractor evidence)
-  latitude      Float?
-  longitude     Float?
-  accuracy      Float?         // meters
-  capturedAt    DateTime?
-  uploadedAt    DateTime       @default(now())
-
-  @@index([workOrderId])
-  @@index([source])
-  @@index([type])
-}
-
-// --- MODEL 11: AuditLog -------------------------------------------------------
-
-model AuditLog {
-  id            String    @id @default(uuid())
-  workOrderId   String?
-  workOrder     WorkOrder? @relation(fields: [workOrderId], references: [id])
-  userId        String?
-  user          User?      @relation(fields: [userId], references: [id])
-  action        String     // e.g. "WORK_ORDER_ASSIGNED", "STATUS_CHANGED", "EVIDENCE_UPLOADED"
-  oldValue      Json?
-  newValue      Json?
-  ipAddress     String?
-  userAgent     String?
-  createdAt     DateTime   @default(now())
-
-  @@index([workOrderId])
-  @@index([userId])
-  @@index([action])
-  @@index([createdAt])
-}
-
-// --- MODEL 12: AccessRequest --------------------------------------------------
-
-model AccessRequest {
-  id              String              @id @default(uuid())
-  companyName     String
-  tradeLicense    String
-  crNumber        String
-  contactName     String
-  email           String              @unique
-  phone           String
-  status          AccessRequestStatus @default(PENDING)
-  reviewedAt      DateTime?
-  reviewNotes     String?
-  // After approval, Contractor record is created and linked
-  contractorId    String?             @unique
-  contractor      Contractor?         @relation(fields: [contractorId], references: [id])
-  createdAt       DateTime            @default(now())
-  updatedAt       DateTime            @updatedAt
-
-  @@index([status])
-  @@index([email])
-}
-
-// --- MODEL 13: ScoringConfig -------------------------------------------------
-// Stores the configurable category weights (must sum to 1.0)
-// Default: HSE 0.40, Technical 0.30, Process 0.20, SiteClosure 0.10
-
-model ScoringConfig {
-  id        String   @id @default(uuid())
-  name      String   @unique  // e.g. "default"
-  weights   Json     // { "HSE & Safety": 0.40, "Technical Installation": 0.30, ... }
-  updatedAt DateTime @updatedAt
-  updatedBy String?  // user id
+  EXCELLENT
+  GOOD
+  FAIR
+  POOR
 }
