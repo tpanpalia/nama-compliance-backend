@@ -5,14 +5,14 @@ import {
   addSection,
   autoSave,
   createTemplate,
-  deleteTemplate,
-  getChecklist,
-  getTemplateById,
+  deactivateTemplate,
+  deleteItem,
+  deleteSection,
+  getByWorkOrder,
+  getTemplate,
   listTemplates,
-  removeItem,
-  removeSection,
   reorderItems,
-  submitChecklistHandler,
+  submitChecklist,
   updateItem,
   updateSection,
   updateTemplate,
@@ -20,7 +20,6 @@ import {
 import { authorize } from '../middleware/authorize';
 import { validate } from '../middleware/validate';
 import { idParamSchema, workOrderIdParamSchema } from '../schemas/common.schema';
-import { autoSaveChecklistSchema, itemSchema, reorderItemsSchema, sectionSchema, templateSchema } from '../schemas/checklist.schema';
 import { EXTERNAL_USER_ROLES } from '../types/roles';
 
 const router = Router();
@@ -42,7 +41,7 @@ const router = Router();
  *       200:
  *         description: Checklist with sections, items, and current responses
  */
-router.get('/work-orders/:workOrderId', authorize(UserRole.INSPECTOR, EXTERNAL_USER_ROLES.CONTRACTOR, UserRole.ADMIN, EXTERNAL_USER_ROLES.REGULATOR), validate({ params: workOrderIdParamSchema }), getChecklist);
+router.get('/work-orders/:workOrderId', authorize(UserRole.INSPECTOR, EXTERNAL_USER_ROLES.CONTRACTOR, UserRole.ADMIN, EXTERNAL_USER_ROLES.REGULATOR), validate({ params: workOrderIdParamSchema }), getByWorkOrder);
 
 /**
  * @swagger
@@ -77,7 +76,7 @@ router.get('/work-orders/:workOrderId', authorize(UserRole.INSPECTOR, EXTERNAL_U
  *       200:
  *         description: Progress saved — returns savedAt and responseCount
  */
-router.post('/work-orders/:workOrderId/auto-save', authorize(UserRole.INSPECTOR), validate({ params: workOrderIdParamSchema, body: autoSaveChecklistSchema }), autoSave);
+router.post('/work-orders/:workOrderId/auto-save', authorize(UserRole.INSPECTOR), validate({ params: workOrderIdParamSchema }), autoSave);
 
 /**
  * @swagger
@@ -99,7 +98,7 @@ router.post('/work-orders/:workOrderId/auto-save', authorize(UserRole.INSPECTOR)
  *       400:
  *         description: Incomplete — lists which required items are missing ratings
  */
-router.post('/work-orders/:workOrderId/submit', authorize(UserRole.INSPECTOR), validate({ params: workOrderIdParamSchema }), submitChecklistHandler);
+router.post('/work-orders/:workOrderId/submit', authorize(UserRole.INSPECTOR), validate({ params: workOrderIdParamSchema }), submitChecklist);
 
 /**
  * @swagger
@@ -114,7 +113,7 @@ router.post('/work-orders/:workOrderId/submit', authorize(UserRole.INSPECTOR), v
  *         description: List of templates
  */
 router.get('/templates', authorize(UserRole.ADMIN), listTemplates);
-router.get('/templates/:id', authorize(UserRole.ADMIN, EXTERNAL_USER_ROLES.REGULATOR), validate({ params: idParamSchema }), getTemplateById);
+router.get('/templates/:id', authorize(UserRole.ADMIN, EXTERNAL_USER_ROLES.REGULATOR), validate({ params: idParamSchema }), getTemplate);
 
 /**
  * @swagger
@@ -138,17 +137,17 @@ router.get('/templates/:id', authorize(UserRole.ADMIN, EXTERNAL_USER_ROLES.REGUL
  *       201:
  *         description: Template created
  */
-router.post('/templates', authorize(UserRole.ADMIN), validate({ body: templateSchema }), createTemplate);
-router.patch('/templates/:id', authorize(UserRole.ADMIN), validate({ params: idParamSchema, body: templateSchema.partial() }), updateTemplate);
-router.delete('/templates/:id', authorize(UserRole.ADMIN), validate({ params: idParamSchema }), deleteTemplate);
+router.post('/templates', authorize(UserRole.ADMIN), createTemplate);
+router.patch('/templates/:id', authorize(UserRole.ADMIN), validate({ params: idParamSchema }), updateTemplate);
+router.delete('/templates/:id', authorize(UserRole.ADMIN), validate({ params: idParamSchema }), deactivateTemplate);
 
-router.post('/templates/:id/sections', authorize(UserRole.ADMIN), validate({ params: idParamSchema, body: sectionSchema }), addSection);
-router.patch('/templates/:id/sections/:sectionId', authorize(UserRole.ADMIN), validate({ body: sectionSchema.partial() }), updateSection);
-router.delete('/templates/:id/sections/:sectionId', authorize(UserRole.ADMIN), removeSection);
+router.post('/templates/:id/sections', authorize(UserRole.ADMIN), validate({ params: idParamSchema }), addSection);
+router.patch('/templates/:id/sections/:sectionId', authorize(UserRole.ADMIN), updateSection);
+router.delete('/templates/:id/sections/:sectionId', authorize(UserRole.ADMIN), deleteSection);
 
-router.post('/templates/:id/sections/:sectionId/items', authorize(UserRole.ADMIN), validate({ body: itemSchema }), addItem);
-router.patch('/templates/:id/sections/:sectionId/items/:itemId', authorize(UserRole.ADMIN), validate({ body: itemSchema.partial() }), updateItem);
-router.delete('/templates/:id/sections/:sectionId/items/:itemId', authorize(UserRole.ADMIN), removeItem);
-router.patch('/templates/:id/reorder-items', authorize(UserRole.ADMIN), validate({ body: reorderItemsSchema }), reorderItems);
+router.post('/templates/:id/sections/:sectionId/items', authorize(UserRole.ADMIN), addItem);
+router.patch('/templates/:id/sections/:sectionId/items/:itemId', authorize(UserRole.ADMIN), updateItem);
+router.delete('/templates/:id/sections/:sectionId/items/:itemId', authorize(UserRole.ADMIN), deleteItem);
+router.patch('/templates/:id/reorder-items', authorize(UserRole.ADMIN), reorderItems);
 
 export default router;

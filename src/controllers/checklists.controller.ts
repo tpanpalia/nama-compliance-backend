@@ -1,196 +1,154 @@
-import { NextFunction, Request, Response } from 'express';
-import { prisma } from '../config/database';
-import { applyTemplateReorder, autoSaveChecklist, getChecklistByWorkOrder, submitChecklist, validateWeights } from '../services/checklists.service';
+﻿import { NextFunction, Request, Response } from 'express';
+import * as ChecklistsService from '../services/checklists.service';
+import {
+  AutoSaveSchema,
+  CreateItemSchema,
+  CreateSectionSchema,
+  CreateTemplateSchema,
+  ReorderItemsSchema,
+} from '../services/checklists.service';
 
-export const getChecklist = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+export const getByWorkOrder = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const data = await getChecklistByWorkOrder(req.params.workOrderId);
-    res.json({ data, message: 'Checklist fetched successfully' });
-  } catch (error) {
-    next(error);
+    const data = await ChecklistsService.getChecklistForWorkOrder(req.params.workOrderId);
+    res.json({ data });
+  } catch (err) {
+    next(err);
   }
 };
 
-export const autoSave = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+export const autoSave = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const data = await autoSaveChecklist(req.params.workOrderId, req.body.responses);
-    res.json({ data, message: 'Checklist auto-saved successfully' });
-  } catch (error) {
-    next(error);
-  }
-};
-
-export const submitChecklistHandler = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
-  try {
-    const data = await submitChecklist(req.params.workOrderId);
-    res.json({ data, message: 'Checklist submitted successfully' });
-  } catch (error) {
-    next(error);
-  }
-};
-
-export const listTemplates = async (_req: Request, res: Response, next: NextFunction): Promise<void> => {
-  try {
-    const data = await prisma.checklistTemplate.findMany({
-      include: { sections: { include: { items: true }, orderBy: { order: 'asc' } } },
-      orderBy: { createdAt: 'desc' },
-    });
-    res.json({ data, message: 'Templates fetched successfully' });
-  } catch (error) {
-    next(error);
-  }
-};
-
-export const getTemplateById = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
-  try {
-    const data = await prisma.checklistTemplate.findUniqueOrThrow({
-      where: { id: req.params.id },
-      include: { sections: { include: { items: true }, orderBy: { order: 'asc' } } },
-    });
-    res.json({ data, message: 'Template fetched successfully' });
-  } catch (error) {
-    next(error);
-  }
-};
-
-export const createTemplate = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
-  try {
-    const data = await prisma.checklistTemplate.create({ data: req.body });
-    res.status(201).json({ data, message: 'Template created successfully' });
-  } catch (error) {
-    next(error);
-  }
-};
-
-export const updateTemplate = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
-  try {
-    const data = await prisma.checklistTemplate.update({
-      where: { id: req.params.id },
-      data: req.body,
-    });
-    res.json({ data, message: 'Template updated successfully' });
-  } catch (error) {
-    next(error);
-  }
-};
-
-export const deleteTemplate = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
-  try {
-    const data = await prisma.checklistTemplate.update({
-      where: { id: req.params.id },
-      data: { isActive: false },
-    });
-    res.json({ data, message: 'Template deactivated successfully' });
-  } catch (error) {
-    next(error);
-  }
-};
-
-export const addSection = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
-  try {
-    const data = await prisma.checklistSection.create({
-      data: { ...req.body, templateId: req.params.id },
-    });
-    res.status(201).json({ data, message: 'Section added successfully' });
-  } catch (error) {
-    next(error);
-  }
-};
-
-export const updateSection = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
-  try {
-    const data = await prisma.checklistSection.update({
-      where: { id: req.params.sectionId },
-      data: req.body,
-    });
-    res.json({ data, message: 'Section updated successfully' });
-  } catch (error) {
-    next(error);
-  }
-};
-
-export const removeSection = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
-  try {
-    await prisma.checklistSection.delete({ where: { id: req.params.sectionId } });
-    res.json({ data: { deleted: true }, message: 'Section removed successfully' });
-  } catch (error) {
-    next(error);
-  }
-};
-
-export const addItem = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
-  try {
-    const data = await prisma.checklistItem.create({
-      data: { ...req.body, sectionId: req.params.sectionId },
-    });
-    res.status(201).json({ data, message: 'Item added successfully' });
-  } catch (error) {
-    next(error);
-  }
-};
-
-export const updateItem = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
-  try {
-    const data = await prisma.checklistItem.update({
-      where: { id: req.params.itemId },
-      data: req.body,
-    });
-    res.json({ data, message: 'Item updated successfully' });
-  } catch (error) {
-    next(error);
-  }
-};
-
-export const removeItem = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
-  try {
-    await prisma.checklistItem.delete({ where: { id: req.params.itemId } });
-    res.json({ data: { deleted: true }, message: 'Item removed successfully' });
-  } catch (error) {
-    next(error);
-  }
-};
-
-export const reorderItems = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
-  try {
-    await applyTemplateReorder(req.params.id, req.body.items);
-    res.json({ data: { updated: true }, message: 'Items reordered successfully' });
-  } catch (error) {
-    next(error);
-  }
-};
-
-export const getScoringConfig = async (_req: Request, res: Response, next: NextFunction): Promise<void> => {
-  try {
-    const data = await prisma.scoringConfig.findUnique({ where: { name: 'default' } });
-    res.json({ data, message: 'Scoring config fetched successfully' });
-  } catch (error) {
-    next(error);
-  }
-};
-
-export const updateScoringConfig = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
-  try {
-    validateWeights(req.body.weights);
-    const sections = await prisma.checklistSection.findMany({
-      where: { template: { isActive: true } },
-      select: { name: true },
-    });
-    const validNames = new Set(sections.map((s) => s.name));
-    for (const key of Object.keys(req.body.weights)) {
-      if (!validNames.has(key)) {
-        res.status(400).json({ error: `Invalid section name: ${key}` });
-        return;
-      }
+    const parsed = AutoSaveSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ error: 'Validation failed', details: parsed.error.flatten().fieldErrors });
     }
+    const data = await ChecklistsService.autoSaveChecklist(req.params.workOrderId, parsed.data.responses);
+    res.json({ data });
+  } catch (err) {
+    next(err);
+  }
+};
 
-    const data = await prisma.scoringConfig.upsert({
-      where: { name: 'default' },
-      update: { weights: req.body.weights, updatedBy: req.user?.dbUserId },
-      create: { name: 'default', weights: req.body.weights, updatedBy: req.user?.dbUserId },
-    });
+export const submitChecklist = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const data = await ChecklistsService.submitChecklist(req.params.workOrderId);
+    res.json({ data });
+  } catch (err) {
+    next(err);
+  }
+};
 
-    res.json({ data, message: 'Scoring config updated successfully' });
-  } catch (error) {
-    next(error);
+export const listTemplates = async (_req: Request, res: Response, next: NextFunction) => {
+  try {
+    res.json({ data: await ChecklistsService.listTemplates() });
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const getTemplate = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    res.json({ data: await ChecklistsService.getTemplateById(req.params.id) });
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const deactivateTemplate = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    res.json({ data: await ChecklistsService.deactivateTemplate(req.params.id) });
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const createTemplate = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const parsed = CreateTemplateSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ error: 'Validation failed', details: parsed.error.flatten().fieldErrors });
+    }
+    res.status(201).json({ data: await ChecklistsService.createTemplate(parsed.data) });
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const updateTemplate = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    res.json({ data: await ChecklistsService.updateTemplate(req.params.id, req.body) });
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const addSection = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const parsed = CreateSectionSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ error: 'Validation failed', details: parsed.error.flatten().fieldErrors });
+    }
+    res.status(201).json({ data: await ChecklistsService.addSection(req.params.id, parsed.data) });
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const updateSection = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    res.json({ data: await ChecklistsService.updateSection(req.params.sectionId, req.body) });
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const deleteSection = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    await ChecklistsService.deleteSection(req.params.sectionId);
+    res.json({ data: { deleted: true } });
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const addItem = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const parsed = CreateItemSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ error: 'Validation failed', details: parsed.error.flatten().fieldErrors });
+    }
+    res.status(201).json({ data: await ChecklistsService.addItem(req.params.sectionId, parsed.data) });
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const updateItem = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    res.json({ data: await ChecklistsService.updateItem(req.params.itemId, req.body) });
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const deleteItem = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    await ChecklistsService.deleteItem(req.params.itemId);
+    res.json({ data: { deleted: true } });
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const reorderItems = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const parsed = ReorderItemsSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ error: 'Validation failed', details: parsed.error.flatten().fieldErrors });
+    }
+    res.json({ data: await ChecklistsService.reorderItems(parsed.data.items) });
+  } catch (err) {
+    next(err);
   }
 };
