@@ -1,20 +1,19 @@
 import { Router } from 'express';
 import { UserRole } from '@prisma/client';
 import {
-  approveWorkOrderHandler,
-  assignWorkOrderHandler,
-  createWorkOrderHandler,
-  getWorkOrderById,
-  getWorkOrders,
-  rejectWorkOrderHandler,
-  reopenWorkOrderHandler,
-  selfAssignWorkOrderHandler,
-  startWorkOrderHandler,
-  submitWorkOrderHandler,
+  approve,
+  assign,
+  create,
+  getById,
+  list,
+  reject,
+  reopen,
+  selfAssign,
+  start,
+  submit,
 } from '../controllers/workOrders.controller';
 import { authorize } from '../middleware/authorize';
 import { validate } from '../middleware/validate';
-import { assignWorkOrderSchema, createWorkOrderSchema, rejectWorkOrderSchema, workOrderFilterSchema } from '../schemas/workOrder.schema';
 import { idParamSchema } from '../schemas/common.schema';
 import { EXTERNAL_USER_ROLES } from '../types/roles';
 
@@ -47,7 +46,7 @@ const router = Router();
  *       401:
  *         description: Unauthorized
  */
-router.get('/', authorize(UserRole.ADMIN, UserRole.INSPECTOR, EXTERNAL_USER_ROLES.CONTRACTOR, EXTERNAL_USER_ROLES.REGULATOR), validate({ query: workOrderFilterSchema }), getWorkOrders);
+router.get('/', authorize(UserRole.ADMIN, UserRole.INSPECTOR, EXTERNAL_USER_ROLES.CONTRACTOR, EXTERNAL_USER_ROLES.REGULATOR), list);
 
 /**
  * @swagger
@@ -68,7 +67,7 @@ router.get('/', authorize(UserRole.ADMIN, UserRole.INSPECTOR, EXTERNAL_USER_ROLE
  *       404:
  *         description: Not found
  */
-router.get('/:id', authorize(UserRole.ADMIN, UserRole.INSPECTOR, EXTERNAL_USER_ROLES.CONTRACTOR, EXTERNAL_USER_ROLES.REGULATOR), validate({ params: idParamSchema }), getWorkOrderById);
+router.get('/:id', authorize(UserRole.ADMIN, UserRole.INSPECTOR, EXTERNAL_USER_ROLES.CONTRACTOR, EXTERNAL_USER_ROLES.REGULATOR), validate({ params: idParamSchema }), getById);
 
 /**
  * @swagger
@@ -108,7 +107,7 @@ router.get('/:id', authorize(UserRole.ADMIN, UserRole.INSPECTOR, EXTERNAL_USER_R
  *       400:
  *         description: Validation error
  */
-router.post('/', authorize(UserRole.ADMIN), validate({ body: createWorkOrderSchema }), createWorkOrderHandler);
+router.post('/', authorize(UserRole.ADMIN), create);
 
 /**
  * @swagger
@@ -136,7 +135,7 @@ router.post('/', authorize(UserRole.ADMIN), validate({ body: createWorkOrderSche
  *       200:
  *         description: Assigned successfully
  */
-router.patch('/:id/assign', authorize(UserRole.ADMIN), validate({ params: idParamSchema, body: assignWorkOrderSchema }), assignWorkOrderHandler);
+router.patch('/:id/assign', authorize(UserRole.ADMIN), validate({ params: idParamSchema }), assign);
 
 /**
  * @swagger
@@ -157,7 +156,7 @@ router.patch('/:id/assign', authorize(UserRole.ADMIN), validate({ params: idPara
  *       400:
  *         description: Work order already assigned or not in PENDING status
  */
-router.post('/:id/self-assign', authorize(UserRole.INSPECTOR), validate({ params: idParamSchema }), selfAssignWorkOrderHandler);
+router.post('/:id/self-assign', authorize(UserRole.INSPECTOR), validate({ params: idParamSchema }), selfAssign);
 
 /**
  * @swagger
@@ -176,7 +175,7 @@ router.post('/:id/self-assign', authorize(UserRole.INSPECTOR), validate({ params
  *       200:
  *         description: Status changed to IN_PROGRESS
  */
-router.patch('/:id/start', authorize(UserRole.INSPECTOR), validate({ params: idParamSchema }), startWorkOrderHandler);
+router.patch('/:id/start', authorize(UserRole.INSPECTOR), validate({ params: idParamSchema }), start);
 
 /**
  * @swagger
@@ -200,7 +199,7 @@ router.patch('/:id/start', authorize(UserRole.INSPECTOR), validate({ params: idP
  *       423:
  *         description: Work order is locked
  */
-router.post('/:id/submit', authorize(UserRole.INSPECTOR), validate({ params: idParamSchema }), submitWorkOrderHandler);
+router.post('/:id/submit', authorize(UserRole.INSPECTOR), validate({ params: idParamSchema }), submit);
 
 /**
  * @swagger
@@ -219,7 +218,7 @@ router.post('/:id/submit', authorize(UserRole.INSPECTOR), validate({ params: idP
  *       200:
  *         description: Approved — isLocked set to true, record is now immutable
  */
-router.patch('/:id/approve', authorize(UserRole.ADMIN), validate({ params: idParamSchema }), approveWorkOrderHandler);
+router.patch('/:id/approve', authorize(UserRole.ADMIN), validate({ params: idParamSchema }), approve);
 
 /**
  * @swagger
@@ -250,7 +249,7 @@ router.patch('/:id/approve', authorize(UserRole.ADMIN), validate({ params: idPar
  *       200:
  *         description: Rejected with reason recorded
  */
-router.patch('/:id/reject', authorize(UserRole.ADMIN), validate({ params: idParamSchema, body: rejectWorkOrderSchema }), rejectWorkOrderHandler);
+router.patch('/:id/reject', authorize(UserRole.ADMIN), validate({ params: idParamSchema }), reject);
 
 /**
  * @swagger
@@ -269,6 +268,6 @@ router.patch('/:id/reject', authorize(UserRole.ADMIN), validate({ params: idPara
  *       200:
  *         description: Status reset to IN_PROGRESS
  */
-router.patch('/:id/reopen', authorize(UserRole.ADMIN), validate({ params: idParamSchema }), reopenWorkOrderHandler);
+router.patch('/:id/reopen', authorize(UserRole.ADMIN), validate({ params: idParamSchema }), reopen);
 
 export default router;
