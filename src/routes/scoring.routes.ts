@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { UserRole } from '@prisma/client';
-import { getScoringConfigController, updateScoringConfigController } from '../controllers/scoring.controller';
+import { getConfig, updateConfig } from '../controllers/scoring.controller';
 import { authorize } from '../middleware/authorize';
 import { EXTERNAL_USER_ROLES } from '../types/roles';
 
@@ -19,7 +19,7 @@ const router = Router();
  *       200:
  *         description: Current scoring config
  */
-router.get('/config', authorize(UserRole.ADMIN, EXTERNAL_USER_ROLES.REGULATOR), getScoringConfigController);
+router.get('/config', authorize(UserRole.ADMIN, EXTERNAL_USER_ROLES.REGULATOR), getConfig);
 
 /**
  * @swagger
@@ -50,6 +50,6 @@ router.get('/config', authorize(UserRole.ADMIN, EXTERNAL_USER_ROLES.REGULATOR), 
  *       400:
  *         description: Weights do not sum to 1.0
  */
-router.patch('/config', authorize(UserRole.ADMIN), updateScoringConfigController);
+router.patch('/config', authorize(UserRole.ADMIN), updateConfig);
 
 export default router;
