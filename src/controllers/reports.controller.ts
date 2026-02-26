@@ -1,65 +1,49 @@
 import { NextFunction, Request, Response } from 'express';
-import { randomUUID } from 'crypto';
-import { prisma } from '../config/database';
-import { generateDownloadPresignedUrl } from '../services/s3.service';
+import * as ReportsService from '../services/reports.service';
+import { GenerateReportSchema } from '../services/reports.service';
 
-interface ReportStore {
-  id: string;
-  type: string;
-  filters: Record<string, unknown>;
-  generatedAt: string;
-  key: string;
-}
-
-const reports = new Map<string, ReportStore>();
-
-export const listReports = async (_req: Request, res: Response): Promise<void> => {
-  const data = Array.from(reports.values());
-  res.json({ data, message: 'Reports fetched successfully' });
-};
-
-export const generateReport = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+export const generate = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const id = randomUUID();
-    const key = `reports/${id}.csv`;
-    const report: ReportStore = {
-      id,
-      type: req.body.type,
-      filters: req.body,
-      generatedAt: new Date().toISOString(),
-      key,
-    };
-
-    if (req.body.contractorId) {
-      await prisma.contractor.findUniqueOrThrow({ where: { id: req.body.contractorId } });
+    const parsed = GenerateReportSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res
+        .status(400)
+        .json({ error: 'Validation failed', details: parsed.error.flatten().fieldErrors });
     }
-
-    reports.set(id, report);
-    res.status(201).json({ data: report, message: 'Report generated successfully' });
-  } catch (error) {
-    next(error);
+    const data = await ReportsService.generateReport(parsed.data, req.user!.email);
+    return res.json({ data });
+  } catch (err) {
+    return next(err);
   }
 };
 
-export const getReportById = async (req: Request, res: Response): Promise<void> => {
-  const data = reports.get(req.params.id);
-  if (!data) {
-    res.status(404).json({ error: 'Report not found' });
-    return;
+export const list = async (_req: Request, res: Response, next: NextFunction) => {
+  try {
+    return res.json({ data: ReportsService.listReports() });
+  } catch (err) {
+    return next(err);
   }
-  res.json({ data, message: 'Report fetched successfully' });
 };
 
-export const downloadReport = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+export const getById = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const report = reports.get(req.params.id);
-    if (!report) {
-      res.status(404).json({ error: 'Report not found' });
-      return;
-    }
-    const data = await generateDownloadPresignedUrl(report.key);
-    res.json({ data, message: 'Report download URL generated successfully' });
-  } catch (error) {
-    next(error);
+    const data = ReportsService.getReportById(req.params.id);
+    return res.json({ data });
+  } catch (err) {
+    return next(err);
+  }
+};
+
+export const download = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    ReportsService.getReportById(req.params.id);
+    return res.json({
+      data: {
+        message: 'PDF generation available in Phase 2',
+        downloadJson: `/api/v1/reports/${req.params.id}`,
+      },
+    });
+  } catch (err) {
+    return next(err);
   }
 };
