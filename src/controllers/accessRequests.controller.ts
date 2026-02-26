@@ -1,87 +1,64 @@
-import { NextFunction, Request, Response } from 'express';
-import { AccessRequestStatus } from '@prisma/client';
-import bcrypt from 'bcryptjs';
-import { prisma } from '../config/database';
-import { generateContractorId } from '../types';
+﻿import { NextFunction, Request, Response } from 'express';
+import * as AccessRequestsService from '../services/accessRequests.service';
+import {
+  ApproveAccessRequestSchema,
+  CreateAccessRequestSchema,
+  RejectAccessRequestSchema,
+} from '../services/accessRequests.service';
 
-export const listAccessRequests = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+export const list = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const where = req.query.status ? { status: req.query.status as AccessRequestStatus } : {};
-    const data = await prisma.accessRequest.findMany({ where, orderBy: { createdAt: 'desc' } });
-    res.json({ data, message: 'Access requests fetched successfully' });
-  } catch (error) {
-    next(error);
+    const data = await AccessRequestsService.listAccessRequests(req.query.status as string | undefined);
+    res.json({ data });
+  } catch (err) {
+    next(err);
   }
 };
 
-export const getAccessRequestById = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+export const getById = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const data = await prisma.accessRequest.findUniqueOrThrow({ where: { id: req.params.id } });
-    res.json({ data, message: 'Access request fetched successfully' });
-  } catch (error) {
-    next(error);
+    const data = await AccessRequestsService.getAccessRequestById(req.params.id);
+    res.json({ data });
+  } catch (err) {
+    next(err);
   }
 };
 
-export const createAccessRequest = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+export const create = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const data = await prisma.accessRequest.create({ data: req.body });
-    res.status(201).json({ data, message: 'Access request submitted successfully' });
-  } catch (error) {
-    next(error);
+    const parsed = CreateAccessRequestSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ error: 'Validation failed', details: parsed.error.flatten().fieldErrors });
+    }
+    const data = await AccessRequestsService.createAccessRequest(parsed.data);
+    res.status(201).json({ data });
+  } catch (err) {
+    next(err);
   }
 };
 
-export const approveAccessRequest = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+export const approve = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const accessRequest = await prisma.accessRequest.findUniqueOrThrow({ where: { id: req.params.id } });
-    const contractorCount = await prisma.contractor.count();
-    const contractorId = generateContractorId(contractorCount + 1);
-    const passwordHash = await bcrypt.hash(req.body.password || 'Welcome@123', 10);
-
-    const contractor = await prisma.contractor.create({
-      data: {
-        contractorId,
-        companyName: accessRequest.companyName,
-        tradeLicense: accessRequest.tradeLicense,
-        crNumber: accessRequest.crNumber,
-        contactName: accessRequest.contactName,
-        email: accessRequest.email,
-        password: passwordHash,
-        phone: accessRequest.phone,
-        isActive: true,
-      },
-    });
-
-    const data = await prisma.accessRequest.update({
-      where: { id: req.params.id },
-      data: {
-        status: AccessRequestStatus.APPROVED,
-        reviewedAt: new Date(),
-        reviewNotes: 'Approved - invitation to be sent manually',
-        contractorId: contractor.id,
-      },
-      include: { contractor: true },
-    });
-
-    res.json({ data, message: 'Access request approved successfully' });
-  } catch (error) {
-    next(error);
+    const parsed = ApproveAccessRequestSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ error: 'Validation failed', details: parsed.error.flatten().fieldErrors });
+    }
+    const data = await AccessRequestsService.approveAccessRequest(req.params.id, parsed.data.password);
+    res.json({ data });
+  } catch (err) {
+    next(err);
   }
 };
 
-export const rejectAccessRequest = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+export const reject = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const data = await prisma.accessRequest.update({
-      where: { id: req.params.id },
-      data: {
-        status: AccessRequestStatus.REJECTED,
-        reviewedAt: new Date(),
-        reviewNotes: req.body.reason,
-      },
-    });
-    res.json({ data, message: 'Access request rejected successfully' });
-  } catch (error) {
-    next(error);
+    const parsed = RejectAccessRequestSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ error: 'Validation failed', details: parsed.error.flatten().fieldErrors });
+    }
+    const data = await AccessRequestsService.rejectAccessRequest(req.params.id, parsed.data.reason);
+    res.json({ data });
+  } catch (err) {
+    next(err);
   }
 };

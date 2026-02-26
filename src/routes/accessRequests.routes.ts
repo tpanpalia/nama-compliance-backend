@@ -1,11 +1,11 @@
 import { Router } from 'express';
 import { UserRole } from '@prisma/client';
 import {
-  approveAccessRequest,
-  createAccessRequest,
-  getAccessRequestById,
-  listAccessRequests,
-  rejectAccessRequest,
+  approve,
+  create,
+  getById,
+  list,
+  reject,
 } from '../controllers/accessRequests.controller';
 import { authorize } from '../middleware/authorize';
 import { authenticate } from '../middleware/authenticate';
@@ -41,7 +41,7 @@ const router = Router();
  *       409:
  *         description: Email already has a pending or approved request
  */
-router.post('/', validate({ body: accessRequestSchema }), createAccessRequest);
+router.post('/', validate({ body: accessRequestSchema }), create);
 router.use(authenticate);
 
 /**
@@ -62,8 +62,8 @@ router.use(authenticate);
  *       200:
  *         description: List of access requests
  */
-router.get('/', authorize(UserRole.ADMIN), listAccessRequests);
-router.get('/:id', authorize(UserRole.ADMIN), validate({ params: idParamSchema }), getAccessRequestById);
+router.get('/', authorize(UserRole.ADMIN), list);
+router.get('/:id', authorize(UserRole.ADMIN), validate({ params: idParamSchema }), getById);
 
 /**
  * @swagger
@@ -94,7 +94,7 @@ router.get('/:id', authorize(UserRole.ADMIN), validate({ params: idParamSchema }
  *       200:
  *         description: Approved — Contractor record created with contractorId
  */
-router.patch('/:id/approve', authorize(UserRole.ADMIN), validate({ params: idParamSchema }), approveAccessRequest);
+router.patch('/:id/approve', authorize(UserRole.ADMIN), validate({ params: idParamSchema }), approve);
 
 /**
  * @swagger
@@ -122,6 +122,6 @@ router.patch('/:id/approve', authorize(UserRole.ADMIN), validate({ params: idPar
  *       200:
  *         description: Request rejected
  */
-router.patch('/:id/reject', authorize(UserRole.ADMIN), validate({ params: idParamSchema, body: rejectRequestSchema }), rejectAccessRequest);
+router.patch('/:id/reject', authorize(UserRole.ADMIN), validate({ params: idParamSchema, body: rejectRequestSchema }), reject);
 
 export default router;

@@ -1,11 +1,11 @@
 import { Router } from 'express';
 import { UserRole } from '@prisma/client';
 import {
-  contractorPerformance,
-  getContractorById,
-  getMyContractorProfile,
-  listContractors,
-  updateContractorStatus,
+  getById,
+  getMe,
+  getPerformance,
+  list,
+  updateStatus,
 } from '../controllers/contractors.controller';
 import { authorize } from '../middleware/authorize';
 import { validate } from '../middleware/validate';
@@ -41,7 +41,7 @@ const router = Router();
  *       200:
  *         description: Paginated contractor list
  */
-router.get('/', authorize(UserRole.ADMIN, EXTERNAL_USER_ROLES.REGULATOR), listContractors);
+router.get('/', authorize(UserRole.ADMIN, EXTERNAL_USER_ROLES.REGULATOR), list);
 
 /**
  * @swagger
@@ -55,7 +55,7 @@ router.get('/', authorize(UserRole.ADMIN, EXTERNAL_USER_ROLES.REGULATOR), listCo
  *       200:
  *         description: Contractor profile and stats
  */
-router.get('/me', authorize(EXTERNAL_USER_ROLES.CONTRACTOR), getMyContractorProfile);
+router.get('/me', authorize(EXTERNAL_USER_ROLES.CONTRACTOR), getMe);
 
 /**
  * @swagger
@@ -76,7 +76,7 @@ router.get('/me', authorize(EXTERNAL_USER_ROLES.CONTRACTOR), getMyContractorProf
  *       404:
  *         description: Not found
  */
-router.get('/:id', authorize(UserRole.ADMIN, EXTERNAL_USER_ROLES.REGULATOR), validate({ params: idParamSchema }), getContractorById);
+router.get('/:id', authorize(UserRole.ADMIN, EXTERNAL_USER_ROLES.REGULATOR), validate({ params: idParamSchema }), getById);
 
 /**
  * @swagger
@@ -95,7 +95,7 @@ router.get('/:id', authorize(UserRole.ADMIN, EXTERNAL_USER_ROLES.REGULATOR), val
  *       200:
  *         description: Returns totalInspections, avgScore, complianceByCategory
  */
-router.get('/:id/performance', authorize(UserRole.ADMIN, EXTERNAL_USER_ROLES.REGULATOR), validate({ params: idParamSchema }), contractorPerformance);
+router.get('/:id/performance', authorize(UserRole.ADMIN, EXTERNAL_USER_ROLES.REGULATOR), validate({ params: idParamSchema }), getPerformance);
 
 /**
  * @swagger
@@ -123,6 +123,6 @@ router.get('/:id/performance', authorize(UserRole.ADMIN, EXTERNAL_USER_ROLES.REG
  *       200:
  *         description: Status updated
  */
-router.patch('/:id/status', authorize(UserRole.ADMIN), validate({ params: idParamSchema, body: contractorStatusSchema }), updateContractorStatus);
+router.patch('/:id/status', authorize(UserRole.ADMIN), validate({ params: idParamSchema, body: contractorStatusSchema }), updateStatus);
 
 export default router;
