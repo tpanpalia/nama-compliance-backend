@@ -116,166 +116,19 @@ const contractorsData = [
   },
 ];
 
-const dAgo = (days: number) => {
-  const d = new Date();
-  d.setDate(d.getDate() - days);
-  return d;
-};
+const dateAt = (dateStr: string) => new Date(dateStr);
 
-function complianceBand(score: number): 'EXCELLENT' | 'GOOD' | 'FAIR' | 'POOR' {
-  if (score >= 90) return 'EXCELLENT';
-  if (score >= 70) return 'GOOD';
-  if (score >= 50) return 'FAIR';
-  return 'POOR';
-}
-
-function ratingForScore(score: number, idx: number): 'COMPLIANT' | 'PARTIAL' | 'NON_COMPLIANT' {
-  const bucket = (idx * 17) % 100;
-  if (score >= 92) return bucket < 90 ? 'COMPLIANT' : 'PARTIAL';
-  if (score >= 85) return bucket < 75 ? 'COMPLIANT' : bucket < 95 ? 'PARTIAL' : 'NON_COMPLIANT';
-  if (score >= 75) return bucket < 55 ? 'COMPLIANT' : bucket < 90 ? 'PARTIAL' : 'NON_COMPLIANT';
-  return bucket < 35 ? 'COMPLIANT' : bucket < 80 ? 'PARTIAL' : 'NON_COMPLIANT';
-}
-
-async function ensureSite(name: string, location: string, region: string, latitude: number, longitude: number) {
+async function ensureSite(name: string, address: string, idx: number) {
   const existing = await prisma.site.findFirst({ where: { name } });
   if (existing) return existing;
-  return prisma.site.create({ data: { name, location, region, latitude, longitude } });
-}
-
-async function seedApprovedWorkOrder(params: {
-  reference: string;
-  title: string;
-  score: number;
-  daysAgo: number;
-  contractorId: string;
-  siteId: string;
-  adminId: string;
-  inspectorId: string;
-  itemIds: string[];
-}) {
-  const approvedAt = dAgo(params.daysAgo);
-  const submittedAt = dAgo(params.daysAgo + 1);
-  const startedAt = dAgo(params.daysAgo + 2);
-  const createdAt = dAgo(params.daysAgo + 3);
-
-  const wo = await prisma.workOrder.upsert({
-    where: { reference: params.reference },
-    update: {
-      title: params.title,
-      status: 'APPROVED',
-      priority: 'MEDIUM',
-      siteId: params.siteId,
-      contractorId: params.contractorId,
-      inspectorId: params.inspectorId,
-      createdById: params.adminId,
-      approvedById: params.adminId,
-      overallScore: params.score,
-      complianceBand: complianceBand(params.score),
-      isLocked: true,
-      startedAt,
-      submittedAt,
-      approvedAt,
-      createdAt,
-    },
-    create: {
-      reference: params.reference,
-      title: params.title,
-      status: 'APPROVED',
-      priority: 'MEDIUM',
-      siteId: params.siteId,
-      contractorId: params.contractorId,
-      inspectorId: params.inspectorId,
-      createdById: params.adminId,
-      approvedById: params.adminId,
-      overallScore: params.score,
-      complianceBand: complianceBand(params.score),
-      isLocked: true,
-      startedAt,
-      submittedAt,
-      approvedAt,
-      createdAt,
-    },
-  });
-
-  const checklist = await prisma.workOrderChecklist.upsert({
-    where: { workOrderId: wo.id },
-    update: {
-      isSubmitted: true,
-      submittedAt,
-      lastSavedAt: submittedAt,
-    },
-    create: {
-      workOrderId: wo.id,
-      isSubmitted: true,
-      submittedAt,
-      lastSavedAt: submittedAt,
-    },
-  });
-
-  for (let i = 0; i < params.itemIds.length; i += 1) {
-    const itemId = params.itemIds[i];
-    await prisma.checklistResponse.upsert({
-      where: {
-        checklistId_itemId: {
-          checklistId: checklist.id,
-          itemId,
-        },
-      },
-      update: {
-        rating: ratingForScore(params.score, i),
-      },
-      create: {
-        checklistId: checklist.id,
-        itemId,
-        rating: ratingForScore(params.score, i),
-      },
-    });
-  }
-}
-
-async function seedInProgressWorkOrder(params: {
-  reference: string;
-  title: string;
-  daysAgo: number;
-  contractorId: string;
-  siteId: string;
-  adminId: string;
-  inspectorId: string;
-}) {
-  const startedAt = dAgo(params.daysAgo);
-  const createdAt = dAgo(params.daysAgo + 1);
-
-  await prisma.workOrder.upsert({
-    where: { reference: params.reference },
-    update: {
-      title: params.title,
-      status: 'IN_PROGRESS',
-      priority: 'MEDIUM',
-      siteId: params.siteId,
-      contractorId: params.contractorId,
-      inspectorId: params.inspectorId,
-      createdById: params.adminId,
-      approvedById: null,
-      overallScore: null,
-      complianceBand: null,
-      isLocked: false,
-      startedAt,
-      submittedAt: null,
-      approvedAt: null,
-      createdAt,
-    },
-    create: {
-      reference: params.reference,
-      title: params.title,
-      status: 'IN_PROGRESS',
-      priority: 'MEDIUM',
-      siteId: params.siteId,
-      contractorId: params.contractorId,
-      inspectorId: params.inspectorId,
-      createdById: params.adminId,
-      startedAt,
-      createdAt,
+  return prisma.site.create({
+    data: {
+      name,
+      location: address,
+      latitude: 23.5 + idx * 0.01,
+      longitude: 58.1 + idx * 0.01,
+      region: address.split(',')[0] || 'Oman',
+      isActive: true,
     },
   });
 }
@@ -285,35 +138,32 @@ async function main(): Promise<void> {
 
   const admin = await prisma.user.upsert({
     where: { email: 'admin@nama.om' },
-    update: {
-      password: hash,
-      displayName: 'Ahmed Al-Busaidi',
-      role: UserRole.ADMIN,
-      isActive: true,
-    },
+    update: { displayName: 'Ahmed Al-Busaidi', password: hash, role: UserRole.ADMIN, isActive: true },
     create: {
       email: 'admin@nama.om',
       password: hash,
       displayName: 'Ahmed Al-Busaidi',
       role: UserRole.ADMIN,
+      isActive: true,
     },
   });
 
-  const inspector = await prisma.user.upsert({
-    where: { email: 'inspector@nama.om' },
-    update: {
-      password: hash,
-      displayName: 'Mohammed Al-Balushi',
-      role: UserRole.INSPECTOR,
-      isActive: true,
-    },
-    create: {
-      email: 'inspector@nama.om',
-      password: hash,
-      displayName: 'Mohammed Al-Balushi',
-      role: UserRole.INSPECTOR,
-    },
-  });
+  const inspectorUsers = [
+    { email: 'ahmed.rashid@nama.om', displayName: 'Ahmed Al-Rashid', role: UserRole.INSPECTOR },
+    { email: 'fatima.balushi@nama.om', displayName: 'Fatima Al-Balushi', role: UserRole.INSPECTOR },
+    { email: 'sara.hinai@nama.om', displayName: 'Sara Al-Hinai', role: UserRole.INSPECTOR },
+    { email: 'khalid.hinai@nama.om', displayName: 'Khalid Al-Hinai', role: UserRole.INSPECTOR },
+  ];
+
+  const inspectors: Record<string, any> = {};
+  for (const u of inspectorUsers) {
+    const user = await prisma.user.upsert({
+      where: { email: u.email },
+      update: { displayName: u.displayName, isActive: true, password: hash },
+      create: { ...u, password: hash, isActive: true },
+    });
+    inspectors[u.displayName] = user;
+  }
 
   await prisma.regulator.upsert({
     where: { email: 'regulator@apsr.om' },
@@ -324,54 +174,8 @@ async function main(): Promise<void> {
       displayName: 'APSR Regulator',
       organisation: 'APSR',
       department: 'Water Services Regulation',
+      isActive: true,
     },
-  });
-
-  const sites = await Promise.all([
-    ensureSite('Al Khoud Extension', 'Muscat, Oman', 'Muscat', 23.5957, 58.1697),
-    ensureSite('Sohar Port Connection', 'Sohar, Oman', 'Al Batinah North', 24.3452, 56.7091),
-    ensureSite('Barka Pipeline Ext', 'Barka, Oman', 'Al Batinah South', 23.7042, 57.8861),
-    ensureSite('Muscat Industrial Zone', 'Muscat, Oman', 'Muscat', 23.6002, 58.2202),
-    ensureSite('Seeb Commercial Area', 'Seeb, Oman', 'Muscat', 23.6744, 58.1656),
-    ensureSite('Al Hail North Pipeline', 'Al Hail, Oman', 'Muscat', 23.6431, 58.2058),
-    ensureSite('Ruwi District Install', 'Ruwi, Oman', 'Muscat', 23.6009, 58.5457),
-    ensureSite('Qurum Heights Project', 'Qurum, Oman', 'Muscat', 23.6143, 58.4892),
-  ]);
-
-  await prisma.checklistResponse.deleteMany({});
-  await prisma.workOrderChecklist.deleteMany({});
-  await prisma.evidence.deleteMany({});
-  await prisma.auditLog.deleteMany({});
-  await prisma.workOrder.deleteMany({});
-  await prisma.accessRequestDocument.deleteMany({});
-  await prisma.accessRequest.updateMany({ data: { contractorId: null } });
-  await prisma.contractor.deleteMany({});
-
-  await prisma.checklistTemplate.deleteMany({ where: { name: 'Standard Compliance Inspection' } });
-
-  const template = await prisma.checklistTemplate.create({
-    data: {
-      name: 'Standard Compliance Inspection',
-      description: 'Default template for water services compliance inspections',
-      sections: {
-        create: sectionsSeed.map((section) => ({
-          name: section.name,
-          description: section.description,
-          weight: section.weight,
-          defaultWeight: section.defaultWeight,
-          order: section.order,
-          items: {
-            create: section.items.map((text, idx) => ({
-              text,
-              isRequired: true,
-              weight: 10,
-              order: idx + 1,
-            })),
-          },
-        })),
-      },
-    },
-    include: { sections: { include: { items: true } } },
   });
 
   for (const c of contractorsData) {
@@ -387,103 +191,323 @@ async function main(): Promise<void> {
         password: hash,
         isActive: true,
       },
-      create: {
-        ...c,
-        password: hash,
+      create: { ...c, password: hash, isActive: true },
+    });
+  }
+
+  const sitesData = [
+    { name: 'Mutrah Corniche Extension', address: 'Muscat, Mutrah' },
+    { name: 'Azaiba Residential Area', address: 'Muscat, Azaiba' },
+    { name: 'Ibri Commercial Zone', address: 'Ad Dhahirah, Ibri' },
+    { name: 'Sohar Industrial Area', address: 'Al Batinah, Sohar' },
+    { name: 'Al Khoud Extension', address: 'Muscat, Al Khoud' },
+    { name: 'Seeb Industrial Area', address: 'Muscat, Seeb' },
+    { name: 'Barka Pipeline', address: 'Al Batinah, Barka' },
+    { name: 'Sohar Port Connection', address: 'Al Batinah, Sohar' },
+    { name: 'Sur Coastal Project', address: 'Ash Sharqiyah, Sur' },
+    { name: 'Nizwa Infrastructure', address: 'Ad Dakhiliyah, Nizwa' },
+    { name: 'Adam Pipeline Ext', address: 'Ad Dakhiliyah, Adam' },
+    { name: 'Muscat Business District', address: 'Muscat' },
+    { name: 'Salalah Commercial Zone', address: 'Dhofar, Salalah' },
+    { name: 'Ruwi District Installation', address: 'Muscat, Ruwi' },
+  ];
+
+  const sites: Record<string, any> = {};
+  for (let i = 0; i < sitesData.length; i += 1) {
+    const s = sitesData[i];
+    const site = await ensureSite(s.name, s.address, i);
+    sites[s.name] = site;
+  }
+
+  await prisma.auditLog.deleteMany();
+  await prisma.checklistResponse.deleteMany();
+  await prisma.workOrderChecklist.deleteMany();
+  await prisma.evidence.deleteMany();
+  await prisma.workOrder.deleteMany();
+  await prisma.checklistTemplate.deleteMany({ where: { name: 'Standard Compliance Inspection' } });
+  const template = await prisma.checklistTemplate.create({
+    data: {
+      name: 'Standard Compliance Inspection',
+      description: 'Default template for water services compliance inspections',
+      sections: {
+        create: sectionsSeed.map((section) => ({
+          name: section.name,
+          description: section.description,
+          weight: section.weight,
+          defaultWeight: section.defaultWeight,
+          order: section.order,
+          items: {
+            create: section.items.map((text, index) => ({
+              text,
+              isRequired: true,
+              weight: 10,
+              order: index + 1,
+            })),
+          },
+        })),
+      },
+    },
+    include: { sections: { include: { items: true } } },
+  });
+
+  const contractors: Record<string, any> = {};
+  const contractorList = await prisma.contractor.findMany();
+  for (const c of contractorList) contractors[c.companyName] = c;
+
+  const now = new Date();
+  const submittedRecent = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+  const submittedRecent2 = new Date(now.getTime() - 2 * 24 * 60 * 60 * 1000);
+  const submittedOld = new Date(now.getTime() - 5 * 24 * 60 * 60 * 1000);
+
+  const workOrdersData = [
+    {
+      reference: 'WO-20260112-0055',
+      title: 'Mutrah Corniche Extension Inspection',
+      status: 'PENDING',
+      siteKey: 'Mutrah Corniche Extension',
+      contractor: null,
+      inspector: null,
+      createdAt: dateAt('2026-01-12'),
+      updatedAt: dateAt('2026-01-12'),
+    },
+    {
+      reference: 'WO-20260111-0052',
+      title: 'Azaiba Residential Area Inspection',
+      status: 'PENDING',
+      siteKey: 'Azaiba Residential Area',
+      contractor: null,
+      inspector: null,
+      createdAt: dateAt('2026-01-11'),
+      updatedAt: dateAt('2026-01-11'),
+    },
+    {
+      reference: 'WO-20260110-0048',
+      title: 'Ibri Commercial Zone Inspection',
+      status: 'ASSIGNED',
+      siteKey: 'Ibri Commercial Zone',
+      contractor: 'Desert Pipeline Solutions',
+      inspector: null,
+      createdAt: dateAt('2026-01-10'),
+      updatedAt: dateAt('2026-01-10'),
+    },
+    {
+      reference: 'WO-20260109-0045',
+      title: 'Sohar Industrial Area Inspection',
+      status: 'IN_PROGRESS',
+      siteKey: 'Sohar Industrial Area',
+      contractor: 'Gulf Infrastructure Ltd',
+      inspector: 'Sara Al-Hinai',
+      startedAt: dateAt('2026-01-13'),
+      createdAt: dateAt('2026-01-09'),
+      updatedAt: dateAt('2026-01-14'),
+    },
+    {
+      reference: 'WO-20260109-0044',
+      title: 'Al Khoud Extension Inspection',
+      status: 'APPROVED',
+      siteKey: 'Al Khoud Extension',
+      contractor: 'Al Noor Construction',
+      inspector: 'Ahmed Al-Rashid',
+      overallScore: 87,
+      complianceBand: 'GOOD',
+      startedAt: dateAt('2026-01-07'),
+      submittedAt: dateAt('2026-01-09'),
+      approvedAt: dateAt('2026-01-09'),
+      isLocked: true,
+      createdAt: dateAt('2026-01-09'),
+      updatedAt: dateAt('2026-01-09'),
+    },
+    {
+      reference: 'WO-20260108-0042',
+      title: 'Seeb Industrial Area Inspection',
+      status: 'SUBMITTED',
+      siteKey: 'Seeb Industrial Area',
+      contractor: 'Gulf Infrastructure Ltd',
+      inspector: 'Fatima Al-Balushi',
+      startedAt: dateAt('2026-01-06'),
+      submittedAt: submittedRecent,
+      createdAt: dateAt('2026-01-08'),
+      updatedAt: dateAt('2026-01-08'),
+    },
+    {
+      reference: 'WO-20260107-0038',
+      title: 'Barka Pipeline Inspection',
+      status: 'APPROVED',
+      siteKey: 'Barka Pipeline',
+      contractor: 'United Engineering Co',
+      inspector: 'Ahmed Al-Rashid',
+      overallScore: 92,
+      complianceBand: 'EXCELLENT',
+      startedAt: dateAt('2026-01-05'),
+      submittedAt: dateAt('2026-01-07'),
+      approvedAt: dateAt('2026-01-07'),
+      isLocked: true,
+      createdAt: dateAt('2026-01-07'),
+      updatedAt: dateAt('2026-01-07'),
+    },
+    {
+      reference: 'WO-20260106-0035',
+      title: 'Sohar Port Connection Inspection',
+      status: 'APPROVED',
+      siteKey: 'Sohar Port Connection',
+      contractor: 'Al Noor Construction',
+      inspector: 'Fatima Al-Balushi',
+      overallScore: 95,
+      complianceBand: 'EXCELLENT',
+      startedAt: dateAt('2026-01-04'),
+      submittedAt: dateAt('2026-01-06'),
+      approvedAt: dateAt('2026-01-06'),
+      isLocked: true,
+      createdAt: dateAt('2026-01-06'),
+      updatedAt: dateAt('2026-01-06'),
+    },
+    {
+      reference: 'WO-20260105-0031',
+      title: 'Sur Coastal Project Inspection',
+      status: 'IN_PROGRESS',
+      siteKey: 'Sur Coastal Project',
+      contractor: 'Coastal Engineering Group',
+      inspector: 'Khalid Al-Hinai',
+      startedAt: dateAt('2026-01-04'),
+      createdAt: dateAt('2026-01-05'),
+      updatedAt: dateAt('2026-01-05'),
+    },
+    {
+      reference: 'WO-20260104-0029',
+      title: 'Nizwa Infrastructure Inspection',
+      status: 'SUBMITTED',
+      siteKey: 'Nizwa Infrastructure',
+      contractor: 'Mountain Services LLC',
+      inspector: 'Ahmed Al-Rashid',
+      startedAt: dateAt('2026-01-02'),
+      submittedAt: submittedOld,
+      createdAt: dateAt('2026-01-04'),
+      updatedAt: dateAt('2026-01-04'),
+    },
+    {
+      reference: 'WO-20260103-0025',
+      title: 'Adam Pipeline Extension Inspection',
+      status: 'SUBMITTED',
+      siteKey: 'Adam Pipeline Ext',
+      contractor: 'Desert Pipeline Solutions',
+      inspector: 'Fatima Al-Balushi',
+      startedAt: dateAt('2026-01-01'),
+      submittedAt: submittedRecent2,
+      createdAt: dateAt('2026-01-03'),
+      updatedAt: dateAt('2026-01-03'),
+    },
+    {
+      reference: 'WO-20260102-0021',
+      title: 'Muscat Business District Inspection',
+      status: 'IN_PROGRESS',
+      siteKey: 'Muscat Business District',
+      contractor: 'Gulf Infrastructure Ltd',
+      inspector: 'Khalid Al-Hinai',
+      startedAt: dateAt('2026-01-01'),
+      createdAt: dateAt('2026-01-02'),
+      updatedAt: dateAt('2026-01-02'),
+    },
+    {
+      reference: 'WO-20260101-0018',
+      title: 'Salalah Commercial Zone Inspection',
+      status: 'IN_PROGRESS',
+      siteKey: 'Salalah Commercial Zone',
+      contractor: 'Coastal Engineering Group',
+      inspector: 'Ahmed Al-Rashid',
+      startedAt: dateAt('2025-12-31'),
+      createdAt: dateAt('2026-01-01'),
+      updatedAt: dateAt('2026-01-01'),
+    },
+    {
+      reference: 'WO-20251230-0015',
+      title: 'Ruwi District Installation Inspection',
+      status: 'APPROVED',
+      siteKey: 'Ruwi District Installation',
+      contractor: 'United Engineering Co',
+      inspector: 'Fatima Al-Balushi',
+      overallScore: 89,
+      complianceBand: 'GOOD',
+      startedAt: dateAt('2025-12-28'),
+      submittedAt: dateAt('2025-12-30'),
+      approvedAt: dateAt('2025-12-30'),
+      isLocked: true,
+      createdAt: dateAt('2025-12-30'),
+      updatedAt: dateAt('2025-12-30'),
+    },
+  ];
+
+  const createdByRef: Record<string, any> = {};
+  for (const woData of workOrdersData) {
+    const { siteKey, contractor: contractorName, inspector: inspectorName, ...data } = woData as any;
+    const created = await prisma.workOrder.create({
+      data: {
+        reference: data.reference,
+        title: data.title,
+        status: data.status as any,
+        priority: 'MEDIUM',
+        siteId: sites[siteKey].id,
+        contractorId: contractorName ? contractors[contractorName]?.id : null,
+        inspectorId: inspectorName ? inspectors[inspectorName]?.id : null,
+        createdById: admin.id,
+        approvedById: data.status === 'APPROVED' ? admin.id : null,
+        overallScore: data.overallScore || null,
+        complianceBand: data.complianceBand || null,
+        isLocked: data.isLocked || false,
+        startedAt: data.startedAt || null,
+        submittedAt: data.submittedAt || null,
+        approvedAt: data.approvedAt || null,
+        createdAt: data.createdAt,
+        updatedAt: data.updatedAt,
+      },
+    });
+    createdByRef[created.reference] = created;
+  }
+
+  const wo0044 = createdByRef['WO-20260109-0044'];
+  if (wo0044) {
+    const checklist = await prisma.workOrderChecklist.create({
+      data: {
+        workOrderId: wo0044.id,
+        isSubmitted: true,
+        submittedAt: wo0044.submittedAt || new Date(),
+        lastSavedAt: wo0044.submittedAt || new Date(),
+      },
+    });
+
+    const items = template.sections
+      .sort((a, b) => a.order - b.order)
+      .flatMap((s) => s.items.sort((a, b) => a.order - b.order));
+
+    for (let i = 0; i < items.length; i += 1) {
+      await prisma.checklistResponse.create({
+        data: {
+          checklistId: checklist.id,
+          itemId: items[i].id,
+          rating: i % 6 === 0 ? 'PARTIAL' : 'COMPLIANT',
+          comment: i % 6 === 0 ? 'Minor deviation corrected on site' : null,
+        },
+      });
+    }
+
+    await prisma.evidence.create({
+      data: {
+        workOrderId: wo0044.id,
+        type: 'PHOTO',
+        source: 'INSPECTOR',
+        s3Key: `local/${wo0044.reference}/evidence-1.jpg`,
+        s3Bucket: 'local-dev',
+        fileName: 'inspection-photo-1.jpg',
+        fileSize: 120000,
+        mimeType: 'image/jpeg',
+        latitude: 23.59,
+        longitude: 58.17,
+        accuracy: 5,
+        capturedAt: wo0044.submittedAt || new Date(),
       },
     });
   }
 
-  const contractors = await prisma.contractor.findMany({ orderBy: { contractorId: 'asc' } });
-  const contractorMap = new Map(contractors.map((c) => [c.contractorId, c.id]));
-  const siteByName = new Map(sites.map((s) => [s.name, s.id]));
-  const allItems = template.sections.flatMap((section) => section.items).sort((a, b) => a.order - b.order);
-  const itemIds = allItems.map((item) => item.id);
-
-  const alNoorWorkOrders = [
-    { reference: 'WD-20260109-0045', score: 87, site: 'Al Khoud Extension', daysAgo: 3 },
-    { reference: 'WD-20260106-0038', score: 95, site: 'Sohar Port Connection', daysAgo: 20 },
-    { reference: 'WD-20260103-0029', score: 92, site: 'Barka Pipeline Ext', daysAgo: 45 },
-    { reference: 'WD-20251228-0021', score: 88, site: 'Muscat Industrial Zone', daysAgo: 70 },
-    { reference: 'WD-20251224-0015', score: 91, site: 'Seeb Commercial Area', daysAgo: 95 },
-    { reference: 'WD-20251220-0009', score: 94, site: 'Al Hail North Pipeline', daysAgo: 120 },
-    { reference: 'WD-20251215-0003', score: 89, site: 'Ruwi District Install', daysAgo: 145 },
-    { reference: 'WD-20251210-0001', score: 86, site: 'Qurum Heights Project', daysAgo: 170 },
-  ];
-
-  for (const woData of alNoorWorkOrders) {
-    await seedApprovedWorkOrder({
-      reference: woData.reference,
-      title: `${woData.site} Inspection`,
-      score: woData.score,
-      daysAgo: woData.daysAgo,
-      contractorId: contractorMap.get('C-00001')!,
-      siteId: siteByName.get(woData.site)!,
-      adminId: admin.id,
-      inspectorId: inspector.id,
-      itemIds,
-    });
-  }
-
-  const otherApproved: Array<{
-    contractorCode: string;
-    score: number;
-    daysAgo: number;
-    reference: string;
-    siteName: string;
-  }> = [
-    { contractorCode: 'C-00002', score: 74, daysAgo: 12, reference: 'WD-20260216-0101', siteName: 'Sohar Port Connection' },
-    { contractorCode: 'C-00002', score: 73, daysAgo: 54, reference: 'WD-20260105-0098', siteName: 'Barka Pipeline Ext' },
-    { contractorCode: 'C-00002', score: 75, daysAgo: 88, reference: 'WD-20251202-0092', siteName: 'Muscat Industrial Zone' },
-    { contractorCode: 'C-00003', score: 80, daysAgo: 18, reference: 'WD-20260210-0110', siteName: 'Al Khoud Extension' },
-    { contractorCode: 'C-00003', score: 81, daysAgo: 44, reference: 'WD-20260115-0108', siteName: 'Qurum Heights Project' },
-    { contractorCode: 'C-00003', score: 82, daysAgo: 79, reference: 'WD-20251211-0106', siteName: 'Ruwi District Install' },
-    { contractorCode: 'C-00003', score: 79, daysAgo: 110, reference: 'WD-20251110-0104', siteName: 'Seeb Commercial Area' },
-    { contractorCode: 'C-00004', score: 67, daysAgo: 26, reference: 'WD-20260202-0120', siteName: 'Barka Pipeline Ext' },
-    { contractorCode: 'C-00004', score: 69, daysAgo: 67, reference: 'WD-20251223-0119', siteName: 'Muscat Industrial Zone' },
-    { contractorCode: 'C-00005', score: 84, daysAgo: 16, reference: 'WD-20260214-0130', siteName: 'Al Hail North Pipeline' },
-    { contractorCode: 'C-00005', score: 85, daysAgo: 61, reference: 'WD-20251229-0128', siteName: 'Seeb Commercial Area' },
-    { contractorCode: 'C-00005', score: 86, daysAgo: 103, reference: 'WD-20251117-0125', siteName: 'Ruwi District Install' },
-    { contractorCode: 'C-00006', score: 78, daysAgo: 205, reference: 'WD-20250808-0201', siteName: 'Sohar Port Connection' },
-    { contractorCode: 'C-00006', score: 79, daysAgo: 230, reference: 'WD-20250714-0200', siteName: 'Qurum Heights Project' },
-  ];
-
-  for (const wo of otherApproved) {
-    await seedApprovedWorkOrder({
-      reference: wo.reference,
-      title: `${wo.siteName} Inspection`,
-      score: wo.score,
-      daysAgo: wo.daysAgo,
-      contractorId: contractorMap.get(wo.contractorCode)!,
-      siteId: siteByName.get(wo.siteName)!,
-      adminId: admin.id,
-      inspectorId: inspector.id,
-      itemIds,
-    });
-  }
-
-  const desertInProgress = [
-    { reference: 'WD-20260220-0301', siteName: 'Al Khoud Extension', daysAgo: 2 },
-    { reference: 'WD-20260218-0302', siteName: 'Sohar Port Connection', daysAgo: 4 },
-    { reference: 'WD-20260216-0303', siteName: 'Barka Pipeline Ext', daysAgo: 6 },
-    { reference: 'WD-20260214-0304', siteName: 'Muscat Industrial Zone', daysAgo: 8 },
-    { reference: 'WD-20260212-0305', siteName: 'Seeb Commercial Area', daysAgo: 10 },
-    { reference: 'WD-20260210-0306', siteName: 'Al Hail North Pipeline', daysAgo: 12 },
-  ];
-
-  for (const wo of desertInProgress) {
-    await seedInProgressWorkOrder({
-      reference: wo.reference,
-      title: `${wo.siteName} Ongoing Inspection`,
-      daysAgo: wo.daysAgo,
-      contractorId: contractorMap.get('C-00006')!,
-      siteId: siteByName.get(wo.siteName)!,
-      adminId: admin.id,
-      inspectorId: inspector.id,
-    });
-  }
-
-  console.log('Contractor seed data complete');
+  console.log('Work orders seeded: 14 records');
 }
 
 main()

@@ -1,81 +1,130 @@
+import { z } from 'zod';
 import { prisma } from '../config/database';
 import { AppError } from '../utils/AppError';
-import { z } from 'zod';
-import { generateWorkOrderReference } from '../types';
-import { calculateComplianceScore } from './scoring.service';
-import { logAction } from './audit.service';
 
-export const CreateWorkOrderSchema = z.object({
-  title: z.string().min(5),
-  description: z.string().optional(),
-  siteId: z.string().uuid(),
-  contractorId: z.string().uuid().optional(),
-  priority: z.enum(['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']).default('MEDIUM'),
-  scheduledDate: z.string().datetime().optional(),
-});
+const OVERDUE_THRESHOLD_DAYS = 3;
 
-export const AssignWorkOrderSchema = z.object({
-  inspectorId: z.string().uuid().optional(),
-  contractorId: z.string().uuid().optional(),
-});
+export function computeDisplayStatus(wo: { status: string; submittedAt: Date | null }): string {
+  if (wo.status === 'PENDING') return 'Unassigned Work Orders';
+  if (wo.status === 'ASSIGNED') return 'Work Yet to Begin';
+  if (wo.status === 'IN_PROGRESS') return 'WIP at Site';
+  if (wo.status === 'APPROVED') return 'Inspection Completed';
+  if (wo.status === 'SUBMITTED') {
+    if (wo.submittedAt) {
+      const daysSince = (Date.now() - wo.submittedAt.getTime()) / (1000 * 60 * 60 * 24);
+      if (daysSince > OVERDUE_THRESHOLD_DAYS) return 'Overdue for Inspection';
+    }
+    return 'Submitted for Inspection';
+  }
+  return wo.status;
+}
 
-export const RejectWorkOrderSchema = z.object({
-  reason: z.string().min(10),
-});
-
-const WO_INCLUDE = {
-  site: { select: { id: true, name: true, region: true } },
-  inspector: { select: { id: true, displayName: true, email: true } },
-  contractor: { select: { id: true, contractorId: true, companyName: true } },
-  createdBy: { select: { id: true, displayName: true } },
-  _count: { select: { evidence: true } },
+const LIST_INCLUDE = {
+  site: { select: { name: true } },
+  contractor: { select: { companyName: true, crNumber: true } },
+  inspector: { select: { displayName: true } },
 };
 
-async function assertNotLocked(id: string) {
-  const wo = await prisma.workOrder.findUnique({ where: { id }, select: { isLocked: true } });
-  if (!wo) throw new AppError('Work order not found', 404);
-  if (wo.isLocked) throw new AppError('Work order is locked and cannot be modified', 423);
-  return wo;
+const DETAIL_INCLUDE = {
+  site: { select: { name: true, location: true } },
+  contractor: { select: { id: true, companyName: true, crNumber: true, email: true, phone: true } },
+  inspector: { select: { id: true, displayName: true, email: true, isActive: true } },
+  createdBy: { select: { displayName: true } },
+  approvedBy: { select: { displayName: true } },
+  checklist: {
+    include: {
+      responses: {
+        include: {
+          item: {
+            include: {
+              section: { select: { id: true, name: true, weight: true, order: true } },
+            },
+          },
+        },
+        orderBy: [
+          { item: { section: { order: 'asc' as const } } },
+          { item: { order: 'asc' as const } },
+        ],
+      },
+    },
+  },
+  evidence: true,
+};
+
+export async function getWorkOrderStats() {
+  const now = new Date();
+  const overdueCutoff = new Date(now.getTime() - OVERDUE_THRESHOLD_DAYS * 24 * 60 * 60 * 1000);
+
+  const [total, completed, wip, overdue] = await Promise.all([
+    prisma.workOrder.count(),
+    prisma.workOrder.count({ where: { status: 'APPROVED' } }),
+    prisma.workOrder.count({ where: { status: 'IN_PROGRESS' } }),
+    prisma.workOrder.count({
+      where: {
+        status: 'SUBMITTED',
+        submittedAt: { lt: overdueCutoff },
+      },
+    }),
+  ]);
+
+  return { total, completed, wip, overdue };
 }
 
 export async function listWorkOrders(filters: {
-  role: string;
-  userId: string;
   status?: string;
-  inspectorId?: string;
-  contractorId?: string;
-  siteId?: string;
-  priority?: string;
-  dateFrom?: string;
-  dateTo?: string;
+  year?: number;
+  month?: number;
+  searchContractor?: string;
+  searchInspector?: string;
   page: number;
   limit: number;
 }) {
-  const { role, userId, page, limit } = filters;
-  const where: any = {};
+  const { status, year, month, searchContractor, searchInspector, page, limit } = filters;
 
-  if (role === 'INSPECTOR') {
-    where.OR = [{ inspectorId: userId }, { status: 'PENDING', inspectorId: null }];
-  } else if (role === 'CONTRACTOR') {
-    where.contractorId = userId;
+  let statusFilter: any = undefined;
+  let overdueFilter: any = undefined;
+
+  if (status === 'OVERDUE') {
+    const cutoff = new Date(Date.now() - OVERDUE_THRESHOLD_DAYS * 24 * 60 * 60 * 1000);
+    statusFilter = 'SUBMITTED';
+    overdueFilter = { lt: cutoff };
+  } else if (status && status !== '') {
+    statusFilter = status;
   }
 
-  if (filters.status) where.status = filters.status;
-  if (filters.inspectorId) where.inspectorId = filters.inspectorId;
-  if (filters.contractorId) where.contractorId = filters.contractorId;
-  if (filters.siteId) where.siteId = filters.siteId;
-  if (filters.priority) where.priority = filters.priority;
-  if (filters.dateFrom || filters.dateTo) {
-    where.createdAt = {
-      ...(filters.dateFrom && { gte: new Date(filters.dateFrom) }),
-      ...(filters.dateTo && { lte: new Date(filters.dateTo) }),
+  const where: any = {
+    ...(statusFilter && { status: statusFilter }),
+    ...(overdueFilter && { submittedAt: overdueFilter }),
+  };
+
+  if (year || month) {
+    const gte = new Date(year || 2020, (month || 1) - 1, 1);
+    const lte = month
+      ? new Date(year || 2030, month, 0, 23, 59, 59)
+      : new Date((year || 2030) + 1, 0, 0, 23, 59, 59);
+    where.createdAt = { gte, lte };
+  }
+
+  if (searchContractor) {
+    where.contractor = {
+      OR: [
+        { companyName: { contains: searchContractor, mode: 'insensitive' } },
+        { crNumber: { contains: searchContractor, mode: 'insensitive' } },
+        { contractorId: { contains: searchContractor, mode: 'insensitive' } },
+      ],
     };
   }
 
-  const [data, total] = await prisma.$transaction([
+  if (searchInspector) {
+    where.inspector = {
+      displayName: { contains: searchInspector, mode: 'insensitive' },
+    };
+  }
+
+  const [workOrders, total] = await prisma.$transaction([
     prisma.workOrder.findMany({
       where,
-      include: WO_INCLUDE,
+      include: LIST_INCLUDE,
       skip: (page - 1) * limit,
       take: limit,
       orderBy: { createdAt: 'desc' },
@@ -83,217 +132,211 @@ export async function listWorkOrders(filters: {
     prisma.workOrder.count({ where }),
   ]);
 
-  return { data, pagination: { page, limit, total, totalPages: Math.ceil(total / limit) } };
+  const stats = await getWorkOrderStats();
+
+  return {
+    data: workOrders.map((wo) => ({
+      ...wo,
+      displayStatus: computeDisplayStatus(wo),
+    })),
+    pagination: { page, limit, total, totalPages: Math.ceil(total / limit) },
+    stats,
+  };
 }
 
-export async function getWorkOrderById(id: string, role?: string, userId?: string) {
-  const workOrder = await prisma.workOrder.findUnique({
+export async function getWorkOrderById(id: string) {
+  const wo = await prisma.workOrder.findUnique({
     where: { id },
-    include: {
-      ...WO_INCLUDE,
-      approvedBy: { select: { id: true, displayName: true } },
-      checklist: { select: { isSubmitted: true, lastSavedAt: true, submittedAt: true } },
-    },
+    include: DETAIL_INCLUDE,
   });
-  if (!workOrder) throw new AppError('Work order not found', 404);
-  if (role === 'CONTRACTOR' && workOrder.contractorId !== userId) {
-    throw new AppError('Access denied', 403);
+  if (!wo) throw new AppError('Work order not found', 404);
+
+  const sectionMap: Record<
+    string,
+    {
+      sectionId: string;
+      sectionName: string;
+      weight: number;
+      order: number;
+      items: Array<{
+        itemId: string;
+        itemText: string;
+        itemOrder: number;
+        isRequired: boolean;
+        responseId?: string;
+        rating?: string;
+        comment?: string;
+        evidence: Array<{
+          id: string;
+          type: string;
+          source: string;
+          fileUrl: string | null;
+          lat?: number | null;
+          lng?: number | null;
+          capturedAt?: Date | null;
+        }>;
+      }>;
+    }
+  > = {};
+
+  if (wo.checklist) {
+    for (const response of wo.checklist.responses) {
+      const section = response.item.section;
+      if (!sectionMap[section.id]) {
+        sectionMap[section.id] = {
+          sectionId: section.id,
+          sectionName: section.name,
+          weight: section.weight,
+          order: section.order,
+          items: [],
+        };
+      }
+      sectionMap[section.id].items.push({
+        itemId: response.item.id,
+        itemText: response.item.text,
+        itemOrder: response.item.order,
+        isRequired: response.item.isRequired,
+        responseId: response.id,
+        rating: response.rating || undefined,
+        comment: response.comment || undefined,
+        evidence: (wo.evidence || []).map((e) => ({
+          id: e.id,
+          type: e.type,
+          source: e.source,
+          fileUrl: null,
+          lat: e.latitude,
+          lng: e.longitude,
+          capturedAt: e.capturedAt,
+        })),
+      });
+    }
   }
-  return workOrder;
+
+  const sections = Object.values(sectionMap)
+    .sort((a, b) => a.order - b.order)
+    .map((s) => ({
+      ...s,
+      items: s.items.sort((a, b) => a.itemOrder - b.itemOrder),
+    }));
+
+  return {
+    ...wo,
+    site: wo.site ? { name: wo.site.name, address: wo.site.location } : null,
+    displayStatus: computeDisplayStatus(wo),
+    sections,
+  };
 }
+
+export const CreateWorkOrderSchema = z.object({
+  siteId: z.string().uuid(),
+  title: z.string().min(3).optional(),
+  priority: z.enum(['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']).default('MEDIUM'),
+  scheduledDate: z.string().datetime().optional(),
+});
 
 export async function createWorkOrder(data: z.infer<typeof CreateWorkOrderSchema>, createdById: string) {
-  const yearStart = new Date(new Date().getFullYear(), 0, 1);
-  const count = await prisma.workOrder.count({ where: { createdAt: { gte: yearStart } } });
-  const reference = generateWorkOrderReference(count + 1);
+  const now = new Date();
+  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const todayEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+  const todayCount = await prisma.workOrder.count({
+    where: { createdAt: { gte: todayStart, lt: todayEnd } },
+  });
 
-  const workOrder = await prisma.workOrder.create({
+  const ymd = now.toISOString().slice(0, 10).replace(/-/g, '');
+  const seq = String(todayCount + 1).padStart(4, '0');
+  const reference = `WO-${ymd}-${seq}`;
+
+  return prisma.workOrder.create({
     data: {
       reference,
-      title: data.title,
-      description: data.description,
-      siteId: data.siteId,
-      contractorId: data.contractorId,
+      title: data.title || reference,
+      status: 'PENDING',
       priority: data.priority,
-      scheduledDate: data.scheduledDate ? new Date(data.scheduledDate) : undefined,
+      siteId: data.siteId,
       createdById,
-      status: data.contractorId ? 'ASSIGNED' : 'PENDING',
+      scheduledDate: data.scheduledDate ? new Date(data.scheduledDate) : null,
     },
-    include: WO_INCLUDE,
+    include: LIST_INCLUDE,
   });
-
-  logAction({
-    workOrderId: workOrder.id,
-    userId: createdById,
-    action: 'WORK_ORDER_CREATED',
-    newValue: { reference, status: workOrder.status },
-  });
-
-  return workOrder;
 }
 
-export async function assignWorkOrder(id: string, data: z.infer<typeof AssignWorkOrderSchema>, assignedById: string) {
-  await assertNotLocked(id);
+export const AssignContractorSchema = z.object({
+  contractorId: z.string().uuid(),
+});
+
+export async function assignContractor(workOrderId: string, contractorId: string) {
+  const wo = await prisma.workOrder.findUnique({ where: { id: workOrderId } });
+  if (!wo) throw new AppError('Work order not found', 404);
+  if (wo.isLocked) throw new AppError('Work order is locked and cannot be modified', 400);
+
+  const contractor = await prisma.contractor.findUnique({ where: { id: contractorId } });
+  if (!contractor) throw new AppError('Contractor not found', 404);
+  if (!contractor.isActive) throw new AppError('Contractor is not active', 400);
+
   const updated = await prisma.workOrder.update({
-    where: { id },
+    where: { id: workOrderId },
     data: {
-      ...(data.inspectorId && { inspectorId: data.inspectorId }),
-      ...(data.contractorId && { contractorId: data.contractorId }),
+      contractorId,
       status: 'ASSIGNED',
+      startedAt: null,
     },
-    include: WO_INCLUDE,
+    include: DETAIL_INCLUDE,
   });
-  logAction({ workOrderId: id, userId: assignedById, action: 'WORK_ORDER_ASSIGNED' });
-  return updated;
+
+  await logAction(workOrderId, 'ASSIGN_CONTRACTOR', `Contractor assigned: ${contractor.companyName}`);
+  return { ...updated, displayStatus: computeDisplayStatus(updated) };
 }
 
-export async function selfAssignWorkOrder(id: string, inspectorId: string) {
-  const workOrder = await prisma.workOrder.findUnique({ where: { id } });
-  if (!workOrder) throw new AppError('Work order not found', 404);
-  if (workOrder.status !== 'PENDING' || workOrder.inspectorId !== null) {
-    throw new AppError('Work order is not available for self-assignment', 400);
+export const AssignInspectorSchema = z.object({
+  inspectorId: z.string().uuid(),
+});
+
+export async function assignInspector(workOrderId: string, inspectorId: string) {
+  const wo = await prisma.workOrder.findUnique({ where: { id: workOrderId } });
+  if (!wo) throw new AppError('Work order not found', 404);
+  if (wo.isLocked) throw new AppError('Work order is locked', 400);
+  if (wo.status === 'PENDING') throw new AppError('Assign contractor first', 400);
+
+  const inspector = await prisma.user.findUnique({ where: { id: inspectorId } });
+  if (!inspector || inspector.role !== 'INSPECTOR') {
+    throw new AppError('Inspector not found', 404);
   }
 
   const updated = await prisma.workOrder.update({
-    where: { id },
-    data: { inspectorId, status: 'ASSIGNED' },
-    include: WO_INCLUDE,
+    where: { id: workOrderId },
+    data: { inspectorId },
+    include: DETAIL_INCLUDE,
   });
-  logAction({ workOrderId: id, userId: inspectorId, action: 'WORK_ORDER_SELF_ASSIGNED' });
-  return updated;
+
+  await logAction(workOrderId, 'ASSIGN_INSPECTOR', `Inspector assigned: ${inspector.displayName}`);
+  return { ...updated, displayStatus: computeDisplayStatus(updated) };
 }
 
-export async function startWorkOrder(id: string, inspectorId: string) {
-  await assertNotLocked(id);
-  const workOrder = await prisma.workOrder.findUnique({ where: { id } });
-  if (!workOrder) throw new AppError('Work order not found', 404);
-  if (workOrder.status !== 'ASSIGNED') {
-    throw new AppError('Work order must be ASSIGNED before starting', 400);
-  }
-  if (workOrder.inspectorId !== inspectorId) {
-    throw new AppError('You are not assigned to this work order', 403);
+async function logAction(workOrderId: string, action: string, details: string) {
+  await prisma.auditLog
+    .create({
+      data: { workOrderId, action, newValue: { details } as any },
+    })
+    .catch(() => {});
+}
+
+export async function approveWorkOrder(workOrderId: string, approvedById: string) {
+  const wo = await prisma.workOrder.findUnique({ where: { id: workOrderId } });
+  if (!wo) throw new AppError('Work order not found', 404);
+  if (wo.status !== 'SUBMITTED') {
+    throw new AppError('Can only approve submitted work orders', 400);
   }
 
   const updated = await prisma.workOrder.update({
-    where: { id },
-    data: { status: 'IN_PROGRESS', startedAt: new Date() },
-    include: WO_INCLUDE,
-  });
-  logAction({ workOrderId: id, userId: inspectorId, action: 'WORK_ORDER_STARTED' });
-  return updated;
-}
-
-export async function submitWorkOrder(id: string, inspectorId: string) {
-  await assertNotLocked(id);
-
-  const workOrder = await prisma.workOrder.findUnique({
-    where: { id },
-    include: {
-      checklist: {
-        include: {
-          responses: {
-            include: {
-              item: {
-                include: {
-                  section: {
-                    select: {
-                      name: true,
-                      weight: true,
-                    },
-                  },
-                },
-              },
-            },
-          },
-        },
-      },
-    },
-  });
-  if (!workOrder) throw new AppError('Work order not found', 404);
-  if (!workOrder.checklist) throw new AppError('No checklist found for this work order', 400);
-
-  const responses = workOrder.checklist.responses.map((r) => ({
-    rating: r.rating as any,
-    isRequired: r.item.isRequired,
-    sectionName: r.item.section.name,
-    sectionWeight: r.item.section.weight,
-  }));
-
-  let scoreResult;
-  try {
-    scoreResult = calculateComplianceScore({ responses });
-  } catch (err: any) {
-    throw new AppError(err.message, 400);
-  }
-
-  const updated = await prisma.workOrder.update({
-    where: { id },
+    where: { id: workOrderId },
     data: {
-      status: 'SUBMITTED',
-      submittedAt: new Date(),
-      overallScore: scoreResult.overallScore,
-      complianceBand: scoreResult.complianceBand as any,
+      status: 'APPROVED',
+      approvedAt: new Date(),
+      approvedById,
+      isLocked: true,
     },
-    include: WO_INCLUDE,
+    include: DETAIL_INCLUDE,
   });
 
-  logAction({
-    workOrderId: id,
-    userId: inspectorId,
-    action: 'WORK_ORDER_SUBMITTED',
-    newValue: { overallScore: scoreResult.overallScore, complianceBand: scoreResult.complianceBand },
-  });
-
-  return { ...updated, categoryScores: scoreResult.categoryScores };
-}
-
-export async function approveWorkOrder(id: string, approvedById: string) {
-  await assertNotLocked(id);
-  const workOrder = await prisma.workOrder.findUnique({ where: { id } });
-  if (!workOrder) throw new AppError('Work order not found', 404);
-  if (workOrder.status !== 'SUBMITTED') {
-    throw new AppError('Only SUBMITTED work orders can be approved', 400);
-  }
-
-  const updated = await prisma.workOrder.update({
-    where: { id },
-    data: { status: 'APPROVED', approvedAt: new Date(), approvedById, isLocked: true },
-    include: WO_INCLUDE,
-  });
-  logAction({ workOrderId: id, userId: approvedById, action: 'WORK_ORDER_APPROVED' });
-  return updated;
-}
-
-export async function rejectWorkOrder(id: string, reason: string, rejectedById: string) {
-  await assertNotLocked(id);
-  const workOrder = await prisma.workOrder.findUnique({ where: { id } });
-  if (!workOrder) throw new AppError('Work order not found', 404);
-  if (workOrder.status !== 'SUBMITTED') {
-    throw new AppError('Only SUBMITTED work orders can be rejected', 400);
-  }
-
-  const updated = await prisma.workOrder.update({
-    where: { id },
-    data: { status: 'REJECTED', rejectionReason: reason },
-    include: WO_INCLUDE,
-  });
-  logAction({ workOrderId: id, userId: rejectedById, action: 'WORK_ORDER_REJECTED', newValue: { reason } });
-  return updated;
-}
-
-export async function reopenWorkOrder(id: string, reopenedById: string) {
-  await assertNotLocked(id);
-  const workOrder = await prisma.workOrder.findUnique({ where: { id } });
-  if (!workOrder) throw new AppError('Work order not found', 404);
-  if (workOrder.status !== 'REJECTED') {
-    throw new AppError('Only REJECTED work orders can be reopened', 400);
-  }
-
-  const updated = await prisma.workOrder.update({
-    where: { id },
-    data: { status: 'IN_PROGRESS', rejectionReason: null },
-    include: WO_INCLUDE,
-  });
-  logAction({ workOrderId: id, userId: reopenedById, action: 'WORK_ORDER_REOPENED' });
-  return updated;
+  return { ...updated, displayStatus: computeDisplayStatus(updated) };
 }

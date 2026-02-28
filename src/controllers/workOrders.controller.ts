@@ -1,25 +1,21 @@
 import { NextFunction, Request, Response } from 'express';
 import * as WorkOrdersService from '../services/workOrders.service';
 import {
-  AssignWorkOrderSchema,
+  AssignContractorSchema,
+  AssignInspectorSchema,
   CreateWorkOrderSchema,
-  RejectWorkOrderSchema,
 } from '../services/workOrders.service';
 
 export const list = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const result = await WorkOrdersService.listWorkOrders({
-      role: req.user!.role as string,
-      userId: req.user!.dbUserId!,
       status: req.query.status as string,
-      inspectorId: req.query.inspectorId as string,
-      contractorId: req.query.contractorId as string,
-      siteId: req.query.siteId as string,
-      priority: req.query.priority as string,
-      dateFrom: req.query.dateFrom as string,
-      dateTo: req.query.dateTo as string,
+      year: req.query.year ? parseInt(req.query.year as string, 10) : undefined,
+      month: req.query.month ? parseInt(req.query.month as string, 10) : undefined,
+      searchContractor: req.query.searchContractor as string,
+      searchInspector: req.query.searchInspector as string,
       page: parseInt(req.query.page as string, 10) || 1,
-      limit: parseInt(req.query.limit as string, 10) || 20,
+      limit: parseInt(req.query.limit as string, 10) || 50,
     });
     res.json(result);
   } catch (err) {
@@ -29,11 +25,7 @@ export const list = async (req: Request, res: Response, next: NextFunction) => {
 
 export const getById = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const data = await WorkOrdersService.getWorkOrderById(
-      req.params.id,
-      req.user!.role as string,
-      req.user!.dbUserId
-    );
+    const data = await WorkOrdersService.getWorkOrderById(req.params.id);
     res.json({ data });
   } catch (err) {
     next(err);
@@ -44,9 +36,10 @@ export const create = async (req: Request, res: Response, next: NextFunction) =>
   try {
     const parsed = CreateWorkOrderSchema.safeParse(req.body);
     if (!parsed.success) {
-      return res
-        .status(400)
-        .json({ error: 'Validation failed', details: parsed.error.flatten().fieldErrors });
+      return res.status(400).json({
+        error: 'Validation failed',
+        details: parsed.error.flatten().fieldErrors,
+      });
     }
     const data = await WorkOrdersService.createWorkOrder(parsed.data, req.user!.dbUserId!);
     return res.status(201).json({ data });
@@ -55,45 +48,29 @@ export const create = async (req: Request, res: Response, next: NextFunction) =>
   }
 };
 
-export const assign = async (req: Request, res: Response, next: NextFunction) => {
+export const assignContractor = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const parsed = AssignWorkOrderSchema.safeParse(req.body);
+    const parsed = AssignContractorSchema.safeParse(req.body);
     if (!parsed.success) {
-      return res
-        .status(400)
-        .json({ error: 'Validation failed', details: parsed.error.flatten().fieldErrors });
+      return res.status(400).json({ error: 'Validation failed' });
     }
-    const data = await WorkOrdersService.assignWorkOrder(req.params.id, parsed.data, req.user!.dbUserId!);
+    const data = await WorkOrdersService.assignContractor(req.params.id, parsed.data.contractorId);
     return res.json({ data });
   } catch (err) {
     return next(err);
   }
 };
 
-export const selfAssign = async (req: Request, res: Response, next: NextFunction) => {
+export const assignInspector = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const data = await WorkOrdersService.selfAssignWorkOrder(req.params.id, req.user!.dbUserId!);
-    res.json({ data });
+    const parsed = AssignInspectorSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ error: 'Validation failed' });
+    }
+    const data = await WorkOrdersService.assignInspector(req.params.id, parsed.data.inspectorId);
+    return res.json({ data });
   } catch (err) {
-    next(err);
-  }
-};
-
-export const start = async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const data = await WorkOrdersService.startWorkOrder(req.params.id, req.user!.dbUserId!);
-    res.json({ data });
-  } catch (err) {
-    next(err);
-  }
-};
-
-export const submit = async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const data = await WorkOrdersService.submitWorkOrder(req.params.id, req.user!.dbUserId!);
-    res.json({ data });
-  } catch (err) {
-    next(err);
+    return next(err);
   }
 };
 
@@ -106,28 +83,9 @@ export const approve = async (req: Request, res: Response, next: NextFunction) =
   }
 };
 
-export const reject = async (req: Request, res: Response, next: NextFunction) => {
+export const getStats = async (_req: Request, res: Response, next: NextFunction) => {
   try {
-    const parsed = RejectWorkOrderSchema.safeParse(req.body);
-    if (!parsed.success) {
-      return res
-        .status(400)
-        .json({ error: 'Validation failed', details: parsed.error.flatten().fieldErrors });
-    }
-    const data = await WorkOrdersService.rejectWorkOrder(
-      req.params.id,
-      parsed.data.reason,
-      req.user!.dbUserId!
-    );
-    return res.json({ data });
-  } catch (err) {
-    return next(err);
-  }
-};
-
-export const reopen = async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const data = await WorkOrdersService.reopenWorkOrder(req.params.id, req.user!.dbUserId!);
+    const data = await WorkOrdersService.getWorkOrderStats();
     res.json({ data });
   } catch (err) {
     next(err);

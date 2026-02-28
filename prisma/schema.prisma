@@ -114,6 +114,7 @@ model WorkOrder {
   @@index([contractorId])
   @@index([siteId])
   @@index([reference])
+  @@index([createdAt])
   @@index([scheduledDate])
 }
 
