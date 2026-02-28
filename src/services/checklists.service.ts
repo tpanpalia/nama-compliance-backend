@@ -17,23 +17,56 @@ export const CreateTemplateSchema = z.object({
   description: z.string().optional(),
 });
 
+export const UpdateTemplateSchema = z.object({
+  name: z.string().min(2).optional(),
+  description: z.string().optional(),
+  isActive: z.boolean().optional(),
+});
+
 export const CreateSectionSchema = z.object({
   name: z.string().min(2),
+  description: z.string().optional(),
   weight: z.number().min(0).max(1),
+  defaultWeight: z.number().min(0).max(1).optional(),
   order: z.number().int(),
 });
 
+export const UpdateSectionSchema = z.object({
+  name: z.string().min(2).optional(),
+  description: z.string().optional(),
+  weight: z.number().min(0).max(1).optional(),
+  defaultWeight: z.number().min(0).max(1).optional(),
+  order: z.number().int().optional(),
+});
+
 export const CreateItemSchema = z.object({
-  text: z.string().min(5),
+  text: z.string().min(5, 'Item text must be at least 5 characters'),
   isRequired: z.boolean().default(true),
-  order: z.number().int(),
+  weight: z.number().int().min(1).max(100).default(10),
+  order: z.number().int().min(0).optional(),
+});
+
+export const UpdateItemSchema = z.object({
+  text: z.string().min(5).optional(),
+  isRequired: z.boolean().optional(),
+  weight: z.number().int().min(1).max(100).optional(),
+  order: z.number().int().min(0).optional(),
 });
 
 export const ReorderItemsSchema = z.object({
   items: z.array(
     z.object({
       id: z.string().uuid(),
-      order: z.number().int(),
+      order: z.number().int().min(0),
+    })
+  ),
+});
+
+export const UpdateSectionWeightsSchema = z.object({
+  sections: z.array(
+    z.object({
+      id: z.string().uuid(),
+      weight: z.number().min(0).max(1),
     })
   ),
 });
@@ -175,7 +208,7 @@ export async function createTemplate(data: z.infer<typeof CreateTemplateSchema>)
 
 export async function updateTemplate(
   id: string,
-  data: Partial<z.infer<typeof CreateTemplateSchema>> & { isActive?: boolean }
+  data: z.infer<typeof UpdateTemplateSchema>
 ) {
   await getTemplateById(id);
   return prisma.checklistTemplate.update({ where: { id }, data });
@@ -188,10 +221,12 @@ export async function deactivateTemplate(id: string) {
 
 export async function addSection(templateId: string, data: z.infer<typeof CreateSectionSchema>) {
   await getTemplateById(templateId);
-  return prisma.checklistSection.create({ data: { ...data, templateId } });
+  return prisma.checklistSection.create({
+    data: { ...data, defaultWeight: data.defaultWeight ?? data.weight, templateId },
+  });
 }
 
-export async function updateSection(sectionId: string, data: Partial<z.infer<typeof CreateSectionSchema>>) {
+export async function updateSection(sectionId: string, data: z.infer<typeof UpdateSectionSchema>) {
   return prisma.checklistSection.update({ where: { id: sectionId }, data });
 }
 
@@ -200,18 +235,108 @@ export async function deleteSection(sectionId: string) {
 }
 
 export async function addItem(sectionId: string, data: z.infer<typeof CreateItemSchema>) {
-  return prisma.checklistItem.create({ data: { ...data, sectionId } });
+  const section = await prisma.checklistSection.findUnique({ where: { id: sectionId } });
+  if (!section) throw new AppError('Section not found', 404);
+
+  const itemCount = await prisma.checklistItem.count({ where: { sectionId } });
+  const order = data.order ?? itemCount;
+
+  return prisma.checklistItem.create({
+    data: {
+      text: data.text,
+      isRequired: data.isRequired,
+      weight: data.weight,
+      order,
+      sectionId,
+    },
+  });
 }
 
-export async function updateItem(itemId: string, data: Partial<z.infer<typeof CreateItemSchema>>) {
+export async function updateItem(itemId: string, data: z.infer<typeof UpdateItemSchema>) {
+  const item = await prisma.checklistItem.findUnique({
+    where: { id: itemId },
+  });
+  if (!item) throw new AppError('Item not found', 404);
+
   return prisma.checklistItem.update({ where: { id: itemId }, data });
 }
 
 export async function deleteItem(itemId: string) {
-  return prisma.checklistItem.delete({ where: { id: itemId } });
+  const item = await prisma.checklistItem.findUnique({
+    where: { id: itemId },
+  });
+  if (!item) throw new AppError('Item not found', 404);
+
+  await prisma.checklistItem.delete({ where: { id: itemId } });
+  return { deleted: true, id: itemId };
 }
 
 export async function reorderItems(items: z.infer<typeof ReorderItemsSchema>['items']) {
   await prisma.$transaction(items.map((item) => prisma.checklistItem.update({ where: { id: item.id }, data: { order: item.order } })));
   return { reordered: items.length };
+}
+
+export async function updateSectionWeights(
+  templateId: string,
+  sections: Array<{ id: string; weight: number }>
+) {
+  const sum = sections.reduce((a, b) => a + b.weight, 0);
+  if (sum < 0.999 || sum > 1.001) {
+    throw new AppError(`Weights must sum to 1.0 — received ${Math.round(sum * 1000) / 1000}`, 400);
+  }
+
+  const dbSections = await prisma.checklistSection.findMany({
+    where: { templateId },
+    select: { id: true },
+  });
+  const validIds = new Set(dbSections.map((s) => s.id));
+  const invalidIds = sections.filter((s) => !validIds.has(s.id));
+  if (invalidIds.length > 0) {
+    throw new AppError('One or more section IDs do not belong to this template', 400);
+  }
+
+  await prisma.$transaction(
+    sections.map((s) =>
+      prisma.checklistSection.update({
+        where: { id: s.id },
+        data: { weight: s.weight },
+      })
+    )
+  );
+
+  return prisma.checklistTemplate.findUnique({
+    where: { id: templateId },
+    include: {
+      sections: {
+        orderBy: { order: 'asc' },
+        include: { items: { orderBy: { order: 'asc' } } },
+      },
+    },
+  });
+}
+
+export async function resetSectionWeightsToDefault(templateId: string) {
+  const sections = await prisma.checklistSection.findMany({
+    where: { templateId },
+    select: { id: true, defaultWeight: true },
+  });
+
+  await prisma.$transaction(
+    sections.map((s) =>
+      prisma.checklistSection.update({
+        where: { id: s.id },
+        data: { weight: s.defaultWeight },
+      })
+    )
+  );
+
+  return prisma.checklistTemplate.findUnique({
+    where: { id: templateId },
+    include: {
+      sections: {
+        orderBy: { order: 'asc' },
+        include: { items: { orderBy: { order: 'asc' } } },
+      },
+    },
+  });
 }

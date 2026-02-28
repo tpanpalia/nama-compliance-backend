@@ -1,14 +1,8 @@
 import bcrypt from 'bcryptjs';
 import { PrismaClient, UserRole, WorkOrderPriority, WorkOrderStatus } from '@prisma/client';
+import { generateRequestId } from '../src/types';
 
 const prisma = new PrismaClient();
-
-const DEFAULT_SCORING_WEIGHTS = {
-  'HSE & Safety': 0.4,
-  'Technical Installation': 0.3,
-  'Process & Communication': 0.2,
-  'Site Closure': 0.1,
-};
 
 async function main(): Promise<void> {
   const hash = await bcrypt.hash('password123', 10);
@@ -96,73 +90,80 @@ async function main(): Promise<void> {
     },
   });
 
+  await prisma.checklistResponse.deleteMany({});
   await prisma.checklistTemplate.deleteMany({ where: { name: 'Standard Compliance Inspection' } });
+
+  const sections = [
+    {
+      name: 'HSE & Safety',
+      description: 'Worker safety, PPE compliance, equipment condition',
+      weight: 0.3,
+      defaultWeight: 0.3,
+      order: 1,
+      items: [
+        'Contractor workers compliance with wearing PPE',
+        'Condition of equipment used by the contractor',
+        'Overall compliance with NAMA HSE standards',
+        'Safety signage and barriers properly placed',
+        'First aid kit present and accessible',
+      ],
+    },
+    {
+      name: 'Technical Installation',
+      description: 'Excavation, pipeline installation, technical compliance',
+      weight: 0.4,
+      defaultWeight: 0.4,
+      order: 2,
+      items: [
+        'Excavation depth and width within specification',
+        'Pipeline bedding material meets standards',
+        'Joint connections properly sealed',
+        'Pressure testing completed and documented',
+      ],
+    },
+    {
+      name: 'Process & Communication',
+      description: 'Notifications, reports, documentation',
+      weight: 0.2,
+      defaultWeight: 0.2,
+      order: 3,
+      items: [
+        'Work permit obtained and displayed',
+        'Residents and stakeholders notified',
+        'Daily progress report submitted',
+      ],
+    },
+    {
+      name: 'Site Closure',
+      description: 'Site cleaning and reinstatement',
+      weight: 0.1,
+      defaultWeight: 0.1,
+      order: 4,
+      items: ['Site fully cleaned and debris removed', 'Road and surface reinstated to original condition'],
+    },
+  ];
 
   const template = await prisma.checklistTemplate.create({
     data: {
       name: 'Standard Compliance Inspection',
       description: 'Default template for water services compliance inspections',
       sections: {
-        create: [
-          {
-            name: 'HSE & Safety',
-            weight: 0.4,
-            order: 1,
-            items: {
-              create: [
-                { text: 'PPE worn by all personnel', order: 1 },
-                { text: 'Hazard signage displayed correctly', order: 2 },
-                { text: 'Emergency exits accessible', order: 3 },
-                { text: 'Fire extinguisher available and valid', order: 4 },
-                { text: 'Permit-to-work documented', order: 5 },
-              ],
-            },
+        create: sections.map((section) => ({
+          name: section.name,
+          description: section.description,
+          weight: section.weight,
+          defaultWeight: section.defaultWeight,
+          order: section.order,
+          items: {
+            create: section.items.map((text, index) => ({
+              text,
+              weight: 10,
+              order: index + 1,
+            })),
           },
-          {
-            name: 'Technical Installation',
-            weight: 0.3,
-            order: 2,
-            items: {
-              create: [
-                { text: 'Pipe alignment matches approved drawing', order: 1 },
-                { text: 'Joint sealing completed to spec', order: 2 },
-                { text: 'Pressure test results within limits', order: 3 },
-                { text: 'Valves tagged and accessible', order: 4 },
-              ],
-            },
-          },
-          {
-            name: 'Process & Communication',
-            weight: 0.2,
-            order: 3,
-            items: {
-              create: [
-                { text: 'Daily progress report submitted', order: 1 },
-                { text: 'Stakeholder updates documented', order: 2 },
-                { text: 'Deviation approvals recorded', order: 3 },
-              ],
-            },
-          },
-          {
-            name: 'Site Closure',
-            weight: 0.1,
-            order: 4,
-            items: {
-              create: [
-                { text: 'Site cleaned and debris removed', order: 1 },
-                { text: 'Handover checklist signed', order: 2 },
-              ],
-            },
-          },
-        ],
+        })),
       },
     },
-  });
-
-  await prisma.scoringConfig.upsert({
-    where: { name: 'default' },
-    update: { weights: DEFAULT_SCORING_WEIGHTS, updatedBy: admin.id },
-    create: { name: 'default', weights: DEFAULT_SCORING_WEIGHTS, updatedBy: admin.id },
   });
 
   const contractor = await prisma.contractor.upsert({
@@ -238,6 +239,195 @@ async function main(): Promise<void> {
       complianceBand: 'GOOD',
     },
   });
+
+  const daysAgo = (days: number) => {
+    const d = new Date('2026-01-12');
+    d.setDate(d.getDate() - days);
+    return d;
+  };
+
+  await prisma.accessRequestDocument.deleteMany();
+  await prisma.accessRequest.deleteMany({
+    where: { status: 'PENDING' },
+  });
+
+  // Generate once to keep utility referenced in seed (request IDs below are fixed sample values)
+  void generateRequestId(new Date('2026-01-12'), 1);
+
+  const requestsData = [
+    {
+      requestId: 'REQ-20260112-001',
+      role: 'REGULATOR',
+      contactName: 'Khalid Al-Hinai',
+      email: 'khalid.hinai@government.om',
+      phone: '+968 9987 6543',
+      organisation: 'APSR',
+      department: 'Water Regulation',
+      status: 'PENDING',
+      createdAt: daysAgo(0),
+      documents: [
+        { name: 'Government ID', status: 'NOT_VERIFIED' },
+        { name: 'Authorization Letter', status: 'NOT_VERIFIED' },
+      ],
+    },
+    {
+      requestId: 'REQ-20260111-005',
+      role: 'REGULATOR',
+      contactName: 'Sara Al-Busaidi',
+      email: 'sara.busaidi@government.om',
+      phone: '+968 9876 5432',
+      organisation: 'Ministry of Regional Municipalities',
+      department: 'Infrastructure',
+      status: 'PENDING',
+      createdAt: daysAgo(1),
+      documents: [
+        { name: 'Government ID', status: 'NOT_VERIFIED' },
+        { name: 'Authorization Letter', status: 'NOT_VERIFIED' },
+      ],
+    },
+    {
+      requestId: 'REQ-20260110-003',
+      role: 'CONTRACTOR',
+      contactName: 'Mohammed Al-Rashdi',
+      email: 'm.rashdi@alnoor.om',
+      phone: '+968 9765 4321',
+      companyName: 'Al Noor Construction',
+      tradeLicense: 'TL-2024-003',
+      crNumber: 'CR-2024-001',
+      status: 'PENDING',
+      createdAt: daysAgo(2),
+      documents: [{ name: 'CR Number Document', status: 'NOT_VERIFIED' }],
+    },
+    {
+      requestId: 'REQ-20260109-008',
+      role: 'CONTRACTOR',
+      contactName: 'Fatima Al-Balushi',
+      email: 'f.balushi@gulfinfra.om',
+      phone: '+968 9654 3210',
+      companyName: 'Gulf Infrastructure Ltd',
+      tradeLicense: 'TL-2024-008',
+      crNumber: 'CR-2024-002',
+      status: 'APPROVED',
+      createdAt: daysAgo(3),
+      reviewedAt: daysAgo(2),
+      documents: [{ name: 'CR Number Document', status: 'VERIFIED' }],
+    },
+    {
+      requestId: 'REQ-20260108-002',
+      role: 'REGULATOR',
+      contactName: 'Ahmed Al-Amri',
+      email: 'ahmed.amri@government.om',
+      phone: '+968 9543 2109',
+      organisation: 'APSR',
+      department: 'Compliance',
+      status: 'APPROVED',
+      createdAt: daysAgo(4),
+      reviewedAt: daysAgo(3),
+      documents: [
+        { name: 'Government ID', status: 'VERIFIED' },
+        { name: 'Authorization Letter', status: 'VERIFIED' },
+      ],
+    },
+    {
+      requestId: 'REQ-20260107-006',
+      role: 'CONTRACTOR',
+      contactName: 'Layla Al-Harthy',
+      email: 'layla.harthy@coastal.om',
+      phone: '+968 9432 1098',
+      companyName: 'Coastal Engineering Group',
+      tradeLicense: 'TL-2024-006',
+      crNumber: 'CR-2024-005',
+      status: 'APPROVED',
+      createdAt: daysAgo(5),
+      reviewedAt: daysAgo(4),
+      documents: [{ name: 'CR Number Document', status: 'VERIFIED' }],
+    },
+    {
+      requestId: 'REQ-20260106-009',
+      role: 'CONTRACTOR',
+      contactName: 'Youssef Al-Kindi',
+      email: 'y.kindi@desert.om',
+      phone: '+968 9321 0987',
+      companyName: 'Desert Pipeline Solutions',
+      tradeLicense: 'TL-2024-009',
+      crNumber: 'CR-2024-006',
+      status: 'REJECTED',
+      createdAt: daysAgo(6),
+      reviewedAt: daysAgo(5),
+      reviewNotes: 'CR Number document could not be verified',
+      documents: [{ name: 'CR Number Document', status: 'NOT_VERIFIED' }],
+    },
+    {
+      requestId: 'REQ-20260105-004',
+      role: 'REGULATOR',
+      contactName: 'Mariam Al-Siyabi',
+      email: 'mariam.siyabi@government.om',
+      phone: '+968 9210 9876',
+      organisation: 'Ministry of Environment',
+      status: 'REJECTED',
+      createdAt: daysAgo(7),
+      reviewedAt: daysAgo(6),
+      reviewNotes: 'Authorization letter missing',
+      documents: [
+        { name: 'Government ID', status: 'VERIFIED' },
+        { name: 'Authorization Letter', status: 'NOT_VERIFIED' },
+      ],
+    },
+    {
+      requestId: 'REQ-20260104-007',
+      role: 'CONTRACTOR',
+      contactName: 'Hassan Al-Lawati',
+      email: 'hassan.lawati@united.om',
+      phone: '+968 9109 8765',
+      companyName: 'United Engineering Co',
+      tradeLicense: 'TL-2024-007',
+      crNumber: 'CR-2024-003',
+      status: 'APPROVED',
+      createdAt: daysAgo(8),
+      reviewedAt: daysAgo(7),
+      documents: [{ name: 'CR Number Document', status: 'VERIFIED' }],
+    },
+    {
+      requestId: 'REQ-20260103-010',
+      role: 'CONTRACTOR',
+      contactName: 'Aisha Al-Mahrouqi',
+      email: 'aisha.mahrouqi@mountain.om',
+      phone: '+968 9098 7654',
+      companyName: 'Mountain Services LLC',
+      tradeLicense: 'TL-2024-010',
+      crNumber: 'CR-2024-004',
+      status: 'APPROVED',
+      createdAt: daysAgo(9),
+      reviewedAt: daysAgo(8),
+      documents: [{ name: 'CR Number Document', status: 'VERIFIED' }],
+    },
+  ];
+
+  for (const req of requestsData) {
+    const { documents, ...requestData } = req;
+    const baseData = {
+      ...requestData,
+      role: requestData.role as any,
+      status: requestData.status as any,
+    };
+
+    await prisma.accessRequest.upsert({
+      where: { requestId: requestData.requestId },
+      update: {
+        ...baseData,
+        documents: {
+          deleteMany: {},
+          create: documents.map((doc) => ({ ...doc, status: doc.status as any })),
+        },
+      },
+      create: {
+        ...baseData,
+        documents: { create: documents.map((doc) => ({ ...doc, status: doc.status as any })) },
+      },
+    });
+  }
+
+  console.log('Access requests seeded: 10 records');
 
   console.log(`Seeded template: ${template.name}`);
 }

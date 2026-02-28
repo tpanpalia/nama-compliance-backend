@@ -1,11 +1,13 @@
-import { ComplianceBand, RatingValue } from '@prisma/client';
-import { COMPLIANCE_BANDS, RATING_POINTS } from '../types';
+import { ComplianceBand } from '@prisma/client';
+import { COMPLIANCE_BANDS } from '../types';
 
 export interface ScoringInput {
-  sectionName: string;
-  sectionWeight?: number;
-  isRequired: boolean;
-  rating: RatingValue | null;
+  responses: Array<{
+    rating: 'COMPLIANT' | 'PARTIAL' | 'NON_COMPLIANT' | null;
+    isRequired: boolean;
+    sectionName: string;
+    sectionWeight: number;
+  }>;
 }
 
 export interface ComplianceScoreResult {
@@ -14,7 +16,7 @@ export interface ComplianceScoreResult {
   categoryScores: Record<string, number>;
 }
 
-const round2 = (value: number): number => Math.round(value * 100) / 100;
+const round1 = (value: number): number => Math.round(value * 10) / 10;
 
 const getBand = (score: number): ComplianceBand => {
   if (score >= COMPLIANCE_BANDS.EXCELLENT.min) return ComplianceBand.EXCELLENT;
@@ -23,57 +25,40 @@ const getBand = (score: number): ComplianceBand => {
   return ComplianceBand.POOR;
 };
 
-const ratingToPoints = (rating: RatingValue): number => {
-  if (rating === RatingValue.COMPLIANT) return RATING_POINTS.COMPLIANT;
-  if (rating === RatingValue.PARTIAL) return RATING_POINTS.PARTIAL;
-  return RATING_POINTS.NON_COMPLIANT;
-};
+export const calculateComplianceScore = (input: ScoringInput): ComplianceScoreResult => {
+  const POINTS: Record<string, number> = {
+    COMPLIANT: 100,
+    PARTIAL: 67,
+    NON_COMPLIANT: 33,
+  };
 
-type ScoringArgs =
-  | ScoringInput[]
-  | {
-      responses: ScoringInput[];
-      weights?: Record<string, number>;
-    };
+  const sections: Record<string, { weight: number; scores: number[] }> = {};
 
-export const calculateComplianceScore = (
-  input: ScoringArgs,
-  fallbackWeights?: Record<string, number>
-): ComplianceScoreResult => {
-  const responses = Array.isArray(input) ? input : input.responses;
-  const weights = Array.isArray(input) ? fallbackWeights : input.weights;
-  const grouped = new Map<string, { weight: number; scores: number[] }>();
-
-  for (const entry of responses) {
-    if (!grouped.has(entry.sectionName)) {
-      grouped.set(entry.sectionName, {
-        weight: weights?.[entry.sectionName] ?? entry.sectionWeight ?? 0,
-        scores: [],
-      });
+  for (const r of input.responses) {
+    if (!sections[r.sectionName]) {
+      sections[r.sectionName] = { weight: r.sectionWeight, scores: [] };
     }
-
-    if (entry.rating === null) {
-      if (entry.isRequired) {
-        throw new Error(`Checklist incomplete. Required item in ${entry.sectionName} is not rated.`);
-      }
-      continue;
+    if (r.isRequired && r.rating === null) {
+      throw new Error(`Required item in section "${r.sectionName}" has no rating`);
     }
-
-    grouped.get(entry.sectionName)?.scores.push(ratingToPoints(entry.rating));
+    if (r.rating !== null) {
+      sections[r.sectionName].scores.push(POINTS[r.rating] || 0);
+    }
   }
 
+  let overallScore = 0;
   const categoryScores: Record<string, number> = {};
-  let overall = 0;
 
-  for (const [sectionName, section] of grouped.entries()) {
-    const sectionScore = section.scores.length
+  for (const [name, section] of Object.entries(sections)) {
+    const avg = section.scores.length
       ? section.scores.reduce((a, b) => a + b, 0) / section.scores.length
       : 0;
-    categoryScores[sectionName] = round2(sectionScore);
-    overall += sectionScore * section.weight;
+    categoryScores[name] = round1(avg);
+    overallScore += avg * section.weight;
   }
 
-  const overallScore = round2(overall);
+  overallScore = round1(overallScore);
+
   return {
     overallScore,
     complianceBand: getBand(overallScore),

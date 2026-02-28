@@ -12,7 +12,9 @@ import {
   getTemplate,
   listTemplates,
   reorderItems,
+  resetSectionWeights,
   submitChecklist,
+  updateSectionWeights,
   updateItem,
   updateSection,
   updateTemplate,
@@ -148,6 +150,98 @@ router.delete('/templates/:id/sections/:sectionId', authorize(UserRole.ADMIN), d
 router.post('/templates/:id/sections/:sectionId/items', authorize(UserRole.ADMIN), addItem);
 router.patch('/templates/:id/sections/:sectionId/items/:itemId', authorize(UserRole.ADMIN), updateItem);
 router.delete('/templates/:id/sections/:sectionId/items/:itemId', authorize(UserRole.ADMIN), deleteItem);
-router.patch('/templates/:id/reorder-items', authorize(UserRole.ADMIN), reorderItems);
+/**
+ * @swagger
+ * /api/v1/checklists/templates/{id}/sections/{sectionId}/items/reorder:
+ *   post:
+ *     summary: Reorder items within a section (ADMIN only)
+ *     tags: [Checklists]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string }
+ *       - in: path
+ *         name: sectionId
+ *         required: true
+ *         schema: { type: string }
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [items]
+ *             properties:
+ *               items:
+ *                 type: array
+ *                 items:
+ *                   type: object
+ *                   properties:
+ *                     id:    { type: string, format: uuid }
+ *                     order: { type: integer, minimum: 0 }
+ *     responses:
+ *       200:
+ *         description: Reordered successfully
+ */
+router.post('/templates/:id/sections/:sectionId/items/reorder', authorize(UserRole.ADMIN), reorderItems);
+
+/**
+ * @swagger
+ * /api/v1/checklists/templates/{templateId}/weights:
+ *   patch:
+ *     summary: Bulk update section weights for a template (ADMIN only)
+ *     description: All section weights must sum to exactly 1.0
+ *     tags: [Checklists]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: templateId
+ *         required: true
+ *         schema: { type: string }
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [sections]
+ *             properties:
+ *               sections:
+ *                 type: array
+ *                 items:
+ *                   type: object
+ *                   properties:
+ *                     id:     { type: string, format: uuid }
+ *                     weight: { type: number, minimum: 0, maximum: 1 }
+ *     responses:
+ *       200:
+ *         description: Weights updated — returns full template with updated sections
+ *       400:
+ *         description: Weights do not sum to 1.0
+ */
+router.patch('/templates/:templateId/weights', authorize(UserRole.ADMIN), updateSectionWeights);
+
+/**
+ * @swagger
+ * /api/v1/checklists/templates/{templateId}/weights/reset:
+ *   post:
+ *     summary: Reset all section weights to their defaultWeight values (ADMIN only)
+ *     tags: [Checklists]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: templateId
+ *         required: true
+ *         schema: { type: string }
+ *     responses:
+ *       200:
+ *         description: Weights reset to defaults
+ */
+router.post('/templates/:templateId/weights/reset', authorize(UserRole.ADMIN), resetSectionWeights);
 
 export default router;

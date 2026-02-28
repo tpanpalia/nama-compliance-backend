@@ -55,6 +55,7 @@ model Regulator {
   isActive     Boolean  @default(true)
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
+  accessRequest AccessRequest?
 
   @@index([email])
   @@index([isActive])
@@ -129,13 +130,15 @@ model ChecklistTemplate {
 }
 
 model ChecklistSection {
-  id         String            @id @default(dbgenerated("(gen_random_uuid())::text"))
-  name       String
-  weight     Float
-  order      Int
-  templateId String
-  items      ChecklistItem[]
-  template   ChecklistTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  id            String            @id @default(dbgenerated("(gen_random_uuid())::text"))
+  name          String
+  description   String?
+  weight        Float
+  defaultWeight Float
+  order         Int
+  templateId    String
+  items         ChecklistItem[]
+  template      ChecklistTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
   @@index([templateId])
   @@index([order])
@@ -145,6 +148,7 @@ model ChecklistItem {
   id         String              @id @default(dbgenerated("(gen_random_uuid())::text"))
   text       String
   isRequired Boolean             @default(true)
+  weight     Int                 @default(10)
   order      Int
   sectionId  String
   section    ChecklistSection    @relation(fields: [sectionId], references: [id], onDelete: Cascade, onUpdate: NoAction)
@@ -226,31 +230,45 @@ model AuditLog {
 }
 
 model AccessRequest {
-  id           String              @id @default(dbgenerated("(gen_random_uuid())::text"))
-  companyName  String
-  tradeLicense String
-  crNumber     String
+  id           String              @id @default(uuid())
+  requestId    String              @unique
+  role         AccessRequestRole
   contactName  String
   email        String              @unique
   phone        String
+  companyName  String?
+  tradeLicense String?
+  crNumber     String?
+  organisation String?
+  department   String?
   status       AccessRequestStatus @default(PENDING)
-  reviewedAt   DateTime?           @db.Timestamptz(6)
+  reviewedAt   DateTime?
   reviewNotes  String?
   contractorId String?             @unique
-  createdAt    DateTime            @default(now()) @db.Timestamptz(6)
-  updatedAt    DateTime            @default(now()) @updatedAt @db.Timestamptz(6)
+  regulatorId  String?             @unique
+  documents    AccessRequestDocument[]
+  createdAt    DateTime            @default(now())
+  updatedAt    DateTime            @updatedAt
   contractor   Contractor?         @relation(fields: [contractorId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  regulator    Regulator?          @relation(fields: [regulatorId], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
   @@index([status])
+  @@index([role])
   @@index([email])
+  @@index([createdAt])
 }
 
-model ScoringConfig {
-  id        String   @id @default(dbgenerated("(gen_random_uuid())::text"))
-  name      String   @unique
-  weights   Json
-  updatedAt DateTime @default(now()) @updatedAt @db.Timestamptz(6)
-  updatedBy String?
+model AccessRequestDocument {
+  id              String         @id @default(uuid())
+  accessRequestId String
+  name            String
+  status          DocumentStatus @default(NOT_VERIFIED)
+  fileUrl         String?
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+  accessRequest   AccessRequest  @relation(fields: [accessRequestId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([accessRequestId])
 }
 
 enum UserRole {
@@ -294,6 +312,17 @@ enum EvidenceSource {
 enum AccessRequestStatus {
   PENDING
   APPROVED
+  REJECTED
+}
+
+enum AccessRequestRole {
+  CONTRACTOR
+  REGULATOR
+}
+
+enum DocumentStatus {
+  NOT_VERIFIED
+  VERIFIED
   REJECTED
 }
 

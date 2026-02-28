@@ -6,6 +6,10 @@ import {
   CreateSectionSchema,
   CreateTemplateSchema,
   ReorderItemsSchema,
+  UpdateSectionSchema,
+  UpdateItemSchema,
+  UpdateTemplateSchema,
+  UpdateSectionWeightsSchema,
 } from '../services/checklists.service';
 
 export const getByWorkOrder = async (req: Request, res: Response, next: NextFunction) => {
@@ -77,7 +81,11 @@ export const createTemplate = async (req: Request, res: Response, next: NextFunc
 
 export const updateTemplate = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    res.json({ data: await ChecklistsService.updateTemplate(req.params.id, req.body) });
+    const parsed = UpdateTemplateSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ error: 'Validation failed', details: parsed.error.flatten().fieldErrors });
+    }
+    res.json({ data: await ChecklistsService.updateTemplate(req.params.id, parsed.data) });
   } catch (err) {
     next(err);
   }
@@ -97,7 +105,11 @@ export const addSection = async (req: Request, res: Response, next: NextFunction
 
 export const updateSection = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    res.json({ data: await ChecklistsService.updateSection(req.params.sectionId, req.body) });
+    const parsed = UpdateSectionSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ error: 'Validation failed', details: parsed.error.flatten().fieldErrors });
+    }
+    res.json({ data: await ChecklistsService.updateSection(req.params.sectionId, parsed.data) });
   } catch (err) {
     next(err);
   }
@@ -126,7 +138,11 @@ export const addItem = async (req: Request, res: Response, next: NextFunction) =
 
 export const updateItem = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    res.json({ data: await ChecklistsService.updateItem(req.params.itemId, req.body) });
+    const parsed = UpdateItemSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ error: 'Validation failed', details: parsed.error.flatten().fieldErrors });
+    }
+    res.json({ data: await ChecklistsService.updateItem(req.params.itemId, parsed.data) });
   } catch (err) {
     next(err);
   }
@@ -150,5 +166,30 @@ export const reorderItems = async (req: Request, res: Response, next: NextFuncti
     res.json({ data: await ChecklistsService.reorderItems(parsed.data.items) });
   } catch (err) {
     next(err);
+  }
+};
+
+export const updateSectionWeights = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const parsed = UpdateSectionWeightsSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({
+        error: 'Validation failed',
+        details: parsed.error.flatten().fieldErrors,
+      });
+    }
+    const data = await ChecklistsService.updateSectionWeights(req.params.templateId, parsed.data.sections);
+    return res.json({ data });
+  } catch (err) {
+    return next(err);
+  }
+};
+
+export const resetSectionWeights = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const data = await ChecklistsService.resetSectionWeightsToDefault(req.params.templateId);
+    return res.json({ data });
+  } catch (err) {
+    return next(err);
   }
 };

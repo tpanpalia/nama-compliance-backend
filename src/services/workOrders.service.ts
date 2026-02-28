@@ -1,7 +1,7 @@
 import { prisma } from '../config/database';
 import { AppError } from '../utils/AppError';
 import { z } from 'zod';
-import { DEFAULT_SCORING_WEIGHTS, generateWorkOrderReference } from '../types';
+import { generateWorkOrderReference } from '../types';
 import { calculateComplianceScore } from './scoring.service';
 import { logAction } from './audit.service';
 
@@ -192,7 +192,18 @@ export async function submitWorkOrder(id: string, inspectorId: string) {
       checklist: {
         include: {
           responses: {
-            include: { item: { include: { section: true } } },
+            include: {
+              item: {
+                include: {
+                  section: {
+                    select: {
+                      name: true,
+                      weight: true,
+                    },
+                  },
+                },
+              },
+            },
           },
         },
       },
@@ -201,18 +212,16 @@ export async function submitWorkOrder(id: string, inspectorId: string) {
   if (!workOrder) throw new AppError('Work order not found', 404);
   if (!workOrder.checklist) throw new AppError('No checklist found for this work order', 400);
 
-  const config = await prisma.scoringConfig.findUnique({ where: { name: 'default' } });
-  const weights = (config?.weights as Record<string, number>) || DEFAULT_SCORING_WEIGHTS;
-
   const responses = workOrder.checklist.responses.map((r) => ({
     rating: r.rating as any,
     isRequired: r.item.isRequired,
     sectionName: r.item.section.name,
+    sectionWeight: r.item.section.weight,
   }));
 
   let scoreResult;
   try {
-    scoreResult = calculateComplianceScore({ responses, weights });
+    scoreResult = calculateComplianceScore({ responses });
   } catch (err: any) {
     throw new AppError(err.message, 400);
   }

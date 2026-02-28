@@ -16,14 +16,6 @@ export const RATING_POINTS = {
   NON_COMPLIANT: 33,
 } as const;
 
-// Default category weights (must sum to 1.0)
-export const DEFAULT_SCORING_WEIGHTS: Record<string, number> = {
-  'HSE & Safety': 0.4,
-  'Technical Installation': 0.3,
-  'Process & Communication': 0.2,
-  'Site Closure': 0.1,
-};
-
 // Compliance bands
 export const COMPLIANCE_BANDS = {
   EXCELLENT: { min: 90, max: 100, label: 'Excellent' },
@@ -44,3 +36,11 @@ export const generateContractorId = (sequence: number): string => {
   const seq = String(sequence).padStart(5, '0');
   return `C-${seq}`;
 };
+
+export function generateRequestId(date: Date, sequence: number): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  const seq = String(sequence).padStart(3, '0');
+  return `REQ-${year}${month}${day}-${seq}`;
+}

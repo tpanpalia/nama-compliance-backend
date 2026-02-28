@@ -3,15 +3,15 @@ import { UserRole } from '@prisma/client';
 import {
   approve,
   create,
+  deactivateUser,
   getById,
   list,
   reject,
+  rejectDocument,
+  verifyDocument,
 } from '../controllers/accessRequests.controller';
 import { authorize } from '../middleware/authorize';
 import { authenticate } from '../middleware/authenticate';
-import { validate } from '../middleware/validate';
-import { idParamSchema } from '../schemas/common.schema';
-import { accessRequestSchema, rejectRequestSchema } from '../schemas/contractor.schema';
 
 const router = Router();
 
@@ -19,30 +19,38 @@ const router = Router();
  * @swagger
  * /api/v1/access-requests:
  *   post:
- *     summary: Submit a contractor registration request (PUBLIC — no auth needed)
+ *     summary: Submit an access request (PUBLIC)
  *     tags: [Access Requests]
  *     requestBody:
  *       required: true
  *       content:
  *         application/json:
  *           schema:
- *             type: object
- *             required: [companyName, tradeLicense, crNumber, contactName, email, phone]
- *             properties:
- *               companyName:  { type: string, example: Al Noor Construction }
- *               tradeLicense: { type: string, example: TL-2024-001 }
- *               crNumber:     { type: string, example: CR-123456 }
- *               contactName:  { type: string, example: Ali Al-Rashdi }
- *               email:        { type: string, format: email }
- *               phone:        { type: string, example: '+96891234567' }
+ *             oneOf:
+ *               - type: object
+ *                 required: [role, contactName, email, phone, companyName, tradeLicense, crNumber]
+ *                 properties:
+ *                   role:         { type: string, enum: [CONTRACTOR] }
+ *                   contactName:  { type: string }
+ *                   email:        { type: string, format: email }
+ *                   phone:        { type: string }
+ *                   companyName:  { type: string }
+ *                   tradeLicense: { type: string }
+ *                   crNumber:     { type: string }
+ *               - type: object
+ *                 required: [role, contactName, email, phone, organisation]
+ *                 properties:
+ *                   role:         { type: string, enum: [REGULATOR] }
+ *                   contactName:  { type: string }
+ *                   email:        { type: string, format: email }
+ *                   phone:        { type: string }
+ *                   organisation: { type: string }
+ *                   department:   { type: string }
  *     responses:
  *       201:
- *         description: Request submitted — pending admin review
- *       409:
- *         description: Email already has a pending or approved request
+ *         description: Access request submitted
  */
-router.post('/', validate({ body: accessRequestSchema }), create);
-router.use(authenticate);
+router.post('/', create);
 
 /**
  * @swagger
@@ -55,21 +63,36 @@ router.use(authenticate);
  *     parameters:
  *       - in: query
  *         name: status
- *         schema:
- *           type: string
- *           enum: [PENDING, APPROVED, REJECTED]
+ *         schema: { type: string, enum: [PENDING, APPROVED, REJECTED] }
+ *       - in: query
+ *         name: role
+ *         schema: { type: string, enum: [CONTRACTOR, REGULATOR] }
+ *       - in: query
+ *         name: year
+ *         schema: { type: integer }
+ *       - in: query
+ *         name: month
+ *         schema: { type: integer, minimum: 1, maximum: 12 }
+ *       - in: query
+ *         name: search
+ *         schema: { type: string }
+ *       - in: query
+ *         name: page
+ *         schema: { type: integer, default: 1 }
+ *       - in: query
+ *         name: limit
+ *         schema: { type: integer, default: 20 }
  *     responses:
  *       200:
- *         description: List of access requests
+ *         description: Paginated access requests with stats
  */
-router.get('/', authorize(UserRole.ADMIN), list);
-router.get('/:id', authorize(UserRole.ADMIN), validate({ params: idParamSchema }), getById);
+router.get('/', authenticate, authorize(UserRole.ADMIN), list);
 
 /**
  * @swagger
- * /api/v1/access-requests/{id}/approve:
- *   patch:
- *     summary: Approve request — creates Contractor account with generated C-XXXXX ID (ADMIN only)
+ * /api/v1/access-requests/{id}:
+ *   get:
+ *     summary: Get access request detail by UUID or requestId (ADMIN only)
  *     tags: [Access Requests]
  *     security:
  *       - BearerAuth: []
@@ -78,6 +101,22 @@ router.get('/:id', authorize(UserRole.ADMIN), validate({ params: idParamSchema }
  *         name: id
  *         required: true
  *         schema: { type: string }
+ *     responses:
+ *       200:
+ *         description: Access request detail
+ *       404:
+ *         description: Not found
+ */
+router.get('/:id', authenticate, authorize(UserRole.ADMIN), getById);
+
+/**
+ * @swagger
+ * /api/v1/access-requests/{id}/approve:
+ *   patch:
+ *     summary: Approve access request (ADMIN only)
+ *     tags: [Access Requests]
+ *     security:
+ *       - BearerAuth: []
  *     requestBody:
  *       required: true
  *       content:
@@ -86,15 +125,12 @@ router.get('/:id', authorize(UserRole.ADMIN), validate({ params: idParamSchema }
  *             type: object
  *             required: [password]
  *             properties:
- *               password:
- *                 type: string
- *                 description: Initial password to set for the contractor account
- *                 example: Welcome@123
+ *               password: { type: string, minLength: 8 }
  *     responses:
  *       200:
- *         description: Approved — Contractor record created with contractorId
+ *         description: Approved and account created
  */
-router.patch('/:id/approve', authorize(UserRole.ADMIN), validate({ params: idParamSchema }), approve);
+router.patch('/:id/approve', authenticate, authorize(UserRole.ADMIN), approve);
 
 /**
  * @swagger
@@ -104,11 +140,6 @@ router.patch('/:id/approve', authorize(UserRole.ADMIN), validate({ params: idPar
  *     tags: [Access Requests]
  *     security:
  *       - BearerAuth: []
- *     parameters:
- *       - in: path
- *         name: id
- *         required: true
- *         schema: { type: string }
  *     requestBody:
  *       required: true
  *       content:
@@ -117,11 +148,68 @@ router.patch('/:id/approve', authorize(UserRole.ADMIN), validate({ params: idPar
  *             type: object
  *             required: [reason]
  *             properties:
- *               reason: { type: string }
+ *               reason: { type: string, minLength: 5 }
  *     responses:
  *       200:
- *         description: Request rejected
+ *         description: Rejected
  */
-router.patch('/:id/reject', authorize(UserRole.ADMIN), validate({ params: idParamSchema, body: rejectRequestSchema }), reject);
+router.patch('/:id/reject', authenticate, authorize(UserRole.ADMIN), reject);
+
+/**
+ * @swagger
+ * /api/v1/access-requests/documents/{documentId}/verify:
+ *   patch:
+ *     summary: Verify access request document (ADMIN only)
+ *     tags: [Access Requests]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: documentId
+ *         required: true
+ *         schema: { type: string, format: uuid }
+ *     responses:
+ *       200:
+ *         description: Document marked VERIFIED
+ */
+router.patch('/documents/:documentId/verify', authenticate, authorize(UserRole.ADMIN), verifyDocument);
+
+/**
+ * @swagger
+ * /api/v1/access-requests/documents/{documentId}/reject:
+ *   patch:
+ *     summary: Reject access request document (ADMIN only)
+ *     tags: [Access Requests]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: documentId
+ *         required: true
+ *         schema: { type: string, format: uuid }
+ *     responses:
+ *       200:
+ *         description: Document marked REJECTED
+ */
+router.patch('/documents/:documentId/reject', authenticate, authorize(UserRole.ADMIN), rejectDocument);
+
+/**
+ * @swagger
+ * /api/v1/access-requests/{id}/deactivate:
+ *   patch:
+ *     summary: Deactivate approved contractor/regulator account linked to access request (ADMIN only)
+ *     tags: [Access Requests]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string }
+ *     responses:
+ *       200:
+ *         description: Deactivated
+ */
+router.patch('/:id/deactivate', authenticate, authorize(UserRole.ADMIN), deactivateUser);
 
 export default router;
