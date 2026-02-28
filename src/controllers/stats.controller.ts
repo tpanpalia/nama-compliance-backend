@@ -8,9 +8,12 @@ export const dashboard = async (req: Request, res: Response, next: NextFunction)
 
     let data;
     switch (role) {
-      case 'ADMIN':
-        data = await StatsService.getAdminDashboard();
+      case 'ADMIN': {
+        const year = req.query.year ? parseInt(req.query.year as string, 10) : undefined;
+        const month = req.query.month ? parseInt(req.query.month as string, 10) : undefined;
+        data = await StatsService.getAdminDashboard({ year, month });
         break;
+      }
       case 'INSPECTOR':
         data = await StatsService.getInspectorDashboard(userId);
         break;
@@ -18,8 +21,10 @@ export const dashboard = async (req: Request, res: Response, next: NextFunction)
         data = await StatsService.getContractorDashboard(userId);
         break;
       case 'REGULATOR':
-      default:
         data = await StatsService.getRegulatorDashboard();
+        break;
+      default:
+        data = await StatsService.getAdminDashboard({});
     }
 
     res.json({ data });
