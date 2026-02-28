@@ -1,16 +1,9 @@
-import { Router } from 'express';
 import { UserRole } from '@prisma/client';
-import {
-  getById,
-  getMe,
-  getPerformance,
-  list,
-  updateStatus,
-} from '../controllers/contractors.controller';
+import { Router } from 'express';
+import * as contractorsController from '../controllers/contractors.controller';
 import { authorize } from '../middleware/authorize';
 import { validate } from '../middleware/validate';
 import { idParamSchema } from '../schemas/common.schema';
-import { contractorStatusSchema } from '../schemas/contractor.schema';
 import { EXTERNAL_USER_ROLES } from '../types/roles';
 
 const router = Router();
@@ -19,7 +12,7 @@ const router = Router();
  * @swagger
  * /api/v1/contractors:
  *   get:
- *     summary: List contractors (ADMIN and REGULATOR)
+ *     summary: List contractors with computed stats (ADMIN and REGULATOR)
  *     tags: [Contractors]
  *     security:
  *       - BearerAuth: []
@@ -27,7 +20,6 @@ const router = Router();
  *       - in: query
  *         name: search
  *         schema: { type: string }
- *         description: Search by company name or email
  *       - in: query
  *         name: isActive
  *         schema: { type: boolean }
@@ -37,31 +29,23 @@ const router = Router();
  *       - in: query
  *         name: limit
  *         schema: { type: integer, default: 20 }
+ *       - in: query
+ *         name: sortBy
+ *         schema: { type: string, enum: [compliance, name, projects] }
+ *       - in: query
+ *         name: sortDir
+ *         schema: { type: string, enum: [asc, desc] }
  *     responses:
  *       200:
- *         description: Paginated contractor list
+ *         description: Paginated contractor list with KPI stats
  */
-router.get('/', authorize(UserRole.ADMIN, EXTERNAL_USER_ROLES.REGULATOR), list);
-
-/**
- * @swagger
- * /api/v1/contractors/me:
- *   get:
- *     summary: Get own contractor profile (CONTRACTOR only)
- *     tags: [Contractors]
- *     security:
- *       - BearerAuth: []
- *     responses:
- *       200:
- *         description: Contractor profile and stats
- */
-router.get('/me', authorize(EXTERNAL_USER_ROLES.CONTRACTOR), getMe);
+router.get('/', authorize(UserRole.ADMIN, EXTERNAL_USER_ROLES.REGULATOR), contractorsController.list);
 
 /**
  * @swagger
  * /api/v1/contractors/{id}:
  *   get:
- *     summary: Get contractor by ID (ADMIN and REGULATOR)
+ *     summary: Get contractor detail including performance summary (ADMIN and REGULATOR)
  *     tags: [Contractors]
  *     security:
  *       - BearerAuth: []
@@ -72,17 +56,22 @@ router.get('/me', authorize(EXTERNAL_USER_ROLES.CONTRACTOR), getMe);
  *         schema: { type: string }
  *     responses:
  *       200:
- *         description: Contractor detail
+ *         description: Contractor detail with enriched metrics and performance object
  *       404:
  *         description: Not found
  */
-router.get('/:id', authorize(UserRole.ADMIN, EXTERNAL_USER_ROLES.REGULATOR), validate({ params: idParamSchema }), getById);
+router.get(
+  '/:id',
+  authorize(UserRole.ADMIN, EXTERNAL_USER_ROLES.REGULATOR),
+  validate({ params: idParamSchema }),
+  contractorsController.getById
+);
 
 /**
  * @swagger
  * /api/v1/contractors/{id}/performance:
  *   get:
- *     summary: Get contractor performance stats (ADMIN and REGULATOR)
+ *     summary: Get contractor performance analytics (ADMIN and REGULATOR)
  *     tags: [Contractors]
  *     security:
  *       - BearerAuth: []
@@ -93,9 +82,48 @@ router.get('/:id', authorize(UserRole.ADMIN, EXTERNAL_USER_ROLES.REGULATOR), val
  *         schema: { type: string }
  *     responses:
  *       200:
- *         description: Returns totalInspections, avgScore, complianceByCategory
+ *         description: Performance charts and inspection history
+ *       404:
+ *         description: Not found
  */
-router.get('/:id/performance', authorize(UserRole.ADMIN, EXTERNAL_USER_ROLES.REGULATOR), validate({ params: idParamSchema }), getPerformance);
+router.get(
+  '/:id/performance',
+  authorize(UserRole.ADMIN, EXTERNAL_USER_ROLES.REGULATOR),
+  validate({ params: idParamSchema }),
+  contractorsController.getPerformance
+);
+
+/**
+ * @swagger
+ * /api/v1/contractors/{id}:
+ *   patch:
+ *     summary: Update contractor details (ADMIN only)
+ *     tags: [Contractors]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string }
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               companyName: { type: string }
+ *               email:       { type: string, format: email }
+ *               phone:       { type: string }
+ *               address:     { type: string }
+ *     responses:
+ *       200:
+ *         description: Contractor updated
+ *       409:
+ *         description: Email already in use
+ */
+router.patch('/:id', authorize(UserRole.ADMIN), validate({ params: idParamSchema }), contractorsController.update);
 
 /**
  * @swagger
@@ -123,6 +151,27 @@ router.get('/:id/performance', authorize(UserRole.ADMIN, EXTERNAL_USER_ROLES.REG
  *       200:
  *         description: Status updated
  */
-router.patch('/:id/status', authorize(UserRole.ADMIN), validate({ params: idParamSchema, body: contractorStatusSchema }), updateStatus);
+router.patch('/:id/status', authorize(UserRole.ADMIN), validate({ params: idParamSchema }), contractorsController.updateStatus);
+
+/**
+ * @swagger
+ * /api/v1/contractors/{id}:
+ *   delete:
+ *     summary: Delete contractor (ADMIN only)
+ *     tags: [Contractors]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string }
+ *     responses:
+ *       200:
+ *         description: Deleted successfully
+ *       400:
+ *         description: Contractor has existing work orders
+ */
+router.delete('/:id', authorize(UserRole.ADMIN), validate({ params: idParamSchema }), contractorsController.remove);
 
 export default router;

@@ -35,13 +35,14 @@ model Contractor {
   email         String         @unique
   password      String
   phone         String
+  address       String?
   isActive      Boolean        @default(true)
   createdAt     DateTime       @default(now()) @db.Timestamptz(6)
   updatedAt     DateTime       @default(now()) @updatedAt @db.Timestamptz(6)
   workOrders    WorkOrder[]
   accessRequest AccessRequest?
 
-  @@index([contractorId])
+  @@index([email])
   @@index([isActive])
 }
 
