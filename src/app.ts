@@ -134,7 +134,7 @@ app.use('/api/v1/contractors', authenticate, contractorsRouter);
 app.use('/api/v1/sites', authenticate, sitesRouter);
 app.use('/api/v1/users', authenticate, usersRouter);
 app.use('/api/v1/stats', authenticate, statsRouter);
-app.use('/api/v1/reports', authenticate, reportsRouter);
+app.use('/api/v1/reports', reportsRouter);
 app.use('/api/v1/regulators', authenticate, regulatorsRouter);
 
 app.use((_req, res) => {
