@@ -1,19 +1,31 @@
 import jwt from 'jsonwebtoken';
+import { CookieOptions } from 'express';
 
-export const JWT_SECRET = process.env.JWT_SECRET || 'dev_secret_change_me';
-export const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '24h';
+const JWT_SECRET = process.env.JWT_SECRET || 'dev_secret_change_me';
+const JWT_EXPIRES = process.env.JWT_EXPIRES_IN || '24h';
 
-export interface JwtPayload {
+export const COOKIE_NAME = 'nama_auth_token';
+
+export const COOKIE_OPTIONS: CookieOptions = {
+  httpOnly: true,
+  secure: process.env.NODE_ENV === 'production',
+  sameSite: process.env.NODE_ENV === 'production' ? 'strict' : 'lax',
+  maxAge: 24 * 60 * 60 * 1000,
+  path: '/',
+};
+
+export interface JWTPayload {
   userId: string;
   email: string;
   role: string;
   isExternal: boolean;
+  dbUserId: string;
 }
 
-export const signToken = (payload: JwtPayload): string => {
-  return jwt.sign(payload, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN } as any);
+export const signToken = (payload: JWTPayload): string => {
+  return jwt.sign(payload, JWT_SECRET, { expiresIn: JWT_EXPIRES } as any);
 };
 
-export const verifyToken = (token: string): JwtPayload => {
-  return jwt.verify(token, JWT_SECRET) as JwtPayload;
+export const verifyToken = (token: string): JWTPayload => {
+  return jwt.verify(token, JWT_SECRET) as JWTPayload;
 };

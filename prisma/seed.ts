@@ -165,6 +165,23 @@ async function main(): Promise<void> {
     inspectors[u.displayName] = user;
   }
 
+  await prisma.user.upsert({
+    where: { email: 'inspector@apsr.om' },
+    update: {
+      displayName: 'Khalid Al-Farsi',
+      password: hash,
+      role: UserRole.REGULATOR,
+      isActive: true,
+    },
+    create: {
+      email: 'inspector@apsr.om',
+      password: hash,
+      displayName: 'Khalid Al-Farsi',
+      role: UserRole.REGULATOR,
+      isActive: true,
+    },
+  });
+
   await prisma.regulator.upsert({
     where: { email: 'regulator@apsr.om' },
     update: {},
@@ -177,6 +194,21 @@ async function main(): Promise<void> {
       isActive: true,
     },
   });
+
+  await prisma.regulator.upsert({
+    where: { email: 'inspector@apsr.om' },
+    update: {},
+    create: {
+      email: 'inspector@apsr.om',
+      password: hash,
+      displayName: 'Khalid Al-Farsi',
+      organisation: 'APSR',
+      department: 'Compliance Division',
+      isActive: true,
+    },
+  });
+
+  console.log('Regulator seeded');
 
   for (const c of contractorsData) {
     await prisma.contractor.upsert({

@@ -80,12 +80,16 @@ export async function enrichContractor(contractor: {
       ? 'Needs Attention'
       : 'Active';
 
+  const complianceStatus =
+    avgCompliance >= 80 ? 'Compliant' : avgCompliance >= 70 ? 'Needs Attention' : avgCompliance > 0 ? 'Non-Compliant' : 'No Data';
+
   return {
     ...contractor,
     activeProjects,
     avgCompliance,
     complianceTrend: trend,
     displayStatus,
+    complianceStatus,
   };
 }
 

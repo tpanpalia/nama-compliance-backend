@@ -1,32 +1,41 @@
 import { Request, Response, NextFunction } from 'express';
-import { verifyToken } from '../config/auth';
+import { COOKIE_NAME, verifyToken } from '../config/auth';
 
-export const authenticate = (req: Request, res: Response, next: NextFunction) => {
-  try {
-    if (req.user) {
-      return next();
-    }
+export function authenticate(req: Request, res: Response, next: NextFunction) {
+  let token: string | undefined;
 
+  if (req.cookies?.[COOKIE_NAME]) {
+    token = req.cookies[COOKIE_NAME];
+  }
+
+  if (!token) {
     const authHeader = req.headers.authorization;
-
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      return res.status(401).json({ error: 'Unauthorized', message: 'No token provided' });
+    if (authHeader?.startsWith('Bearer ')) {
+      token = authHeader.substring(7);
     }
+  }
 
-    const token = authHeader.split(' ')[1];
+  if (!token) {
+    return res.status(401).json({
+      error: 'Authentication required',
+      code: 'NO_TOKEN',
+    });
+  }
+
+  try {
     const payload = verifyToken(token);
-
     req.user = {
-      oid: payload.userId,
+      userId: payload.userId,
       email: payload.email,
-      displayName: payload.email,
       role: payload.role as any,
       isExternal: payload.isExternal,
-      dbUserId: payload.userId,
+      dbUserId: payload.dbUserId,
     };
-
-    next();
-  } catch (err) {
-    return res.status(401).json({ error: 'Unauthorized', message: 'Invalid or expired token' });
+    return next();
+  } catch (_err) {
+    return res.status(401).json({
+      error: 'Session expired. Please log in again.',
+      code: 'INVALID_TOKEN',
+    });
   }
-};
+}

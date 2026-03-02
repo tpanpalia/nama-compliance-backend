@@ -4,13 +4,18 @@ import { ExternalUserRole } from './roles';
 declare global {
   namespace Express {
     interface Request {
+      sanitizedBody?: Record<string, unknown>;
+    }
+
+    interface Request {
       user?: {
-        oid: string;
+        oid?: string;
+        userId?: string;
         email: string;
-        displayName: string;
+        displayName?: string;
         role: UserRole | ExternalUserRole;
         isExternal: boolean;
-        dbUserId?: string;
+        dbUserId: string;
       };
     }
   }

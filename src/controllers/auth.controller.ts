@@ -1,134 +1,226 @@
-import { Request, Response } from 'express';
+import { NextFunction, Request, Response } from 'express';
 import bcrypt from 'bcryptjs';
 import { prisma } from '../config/database';
-import { signToken } from '../config/auth';
+import { COOKIE_NAME, COOKIE_OPTIONS, JWTPayload, signToken } from '../config/auth';
 
-export const login = async (req: Request, res: Response) => {
+const BCRYPT_ROUNDS = 10;
+const DUMMY_HASH = bcrypt.hashSync('dummy_password_for_timing', BCRYPT_ROUNDS);
+
+export const login = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { email, password } = req.body;
 
     if (!email || !password) {
-      return res.status(400).json({ error: 'Email and password are required' });
+      return res.status(400).json({
+        error: 'Email and password are required',
+        code: 'MISSING_CREDENTIALS',
+      });
     }
 
-    const user = await prisma.user.findUnique({ where: { email } });
-
-    if (user) {
-      if (!user.isActive) {
-        return res.status(403).json({ error: 'Account is deactivated' });
-      }
-      const valid = await bcrypt.compare(password, user.password);
-      if (!valid) {
-        return res.status(401).json({ error: 'Invalid email or password' });
-      }
-      const token = signToken({
-        userId: user.id,
-        email: user.email,
-        role: user.role,
-        isExternal: false,
+    if (typeof email !== 'string' || typeof password !== 'string') {
+      return res.status(400).json({
+        error: 'Invalid input format',
+        code: 'INVALID_INPUT',
       });
-      return res.json({
-        token,
-        user: {
-          id: user.id,
-          email: user.email,
-          displayName: user.displayName,
-          role: user.role,
-          isExternal: false,
+    }
+
+    const emailNormalized = email.toLowerCase().trim();
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(emailNormalized)) {
+      return res.status(400).json({
+        error: 'Invalid email format',
+        code: 'INVALID_EMAIL',
+      });
+    }
+
+    let dbUserId: string | null = null;
+    let dbPassword: string | null = null;
+    let role: string | null = null;
+    let isActive = false;
+    let displayName: string | null = null;
+
+    const internalUser = await prisma.user.findUnique({
+      where: { email: emailNormalized },
+      select: {
+        id: true,
+        email: true,
+        password: true,
+        role: true,
+        isActive: true,
+        displayName: true,
+      },
+    });
+
+    if (internalUser) {
+      dbUserId = internalUser.id;
+      dbPassword = internalUser.password;
+      role = internalUser.role;
+      isActive = internalUser.isActive;
+      displayName = internalUser.displayName;
+    }
+
+    if (!dbUserId) {
+      const contractor = await prisma.contractor.findUnique({
+        where: { email: emailNormalized },
+        select: {
+          id: true,
+          email: true,
+          password: true,
+          isActive: true,
+          companyName: true,
         },
       });
+      if (contractor) {
+        dbUserId = contractor.id;
+        dbPassword = contractor.password;
+        role = 'CONTRACTOR';
+        isActive = contractor.isActive;
+        displayName = contractor.companyName;
+      }
     }
 
-    const contractor = await prisma.contractor.findUnique({ where: { email } });
-
-    if (contractor) {
-      if (!contractor.isActive) {
-        return res.status(403).json({ error: 'Account is deactivated' });
-      }
-      const valid = await bcrypt.compare(password, contractor.password);
-      if (!valid) {
-        return res.status(401).json({ error: 'Invalid email or password' });
-      }
-      const token = signToken({
-        userId: contractor.id,
-        email: contractor.email,
-        role: 'CONTRACTOR',
-        isExternal: true,
-      });
-      return res.json({
-        token,
-        user: {
-          id: contractor.id,
-          email: contractor.email,
-          displayName: contractor.companyName,
-          role: 'CONTRACTOR',
-          contractorId: contractor.contractorId,
-          isExternal: true,
+    if (!dbUserId) {
+      const regulator = await prisma.regulator.findUnique({
+        where: { email: emailNormalized },
+        select: {
+          id: true,
+          email: true,
+          password: true,
+          isActive: true,
+          displayName: true,
         },
       });
+      if (regulator) {
+        dbUserId = regulator.id;
+        dbPassword = regulator.password;
+        role = 'REGULATOR';
+        isActive = regulator.isActive;
+        displayName = regulator.displayName;
+      }
     }
 
-    const regulator = await prisma.regulator.findUnique({ where: { email } });
-    if (regulator) {
-      if (!regulator.isActive) {
-        return res.status(403).json({ error: 'Account is deactivated' });
-      }
-      const valid = await bcrypt.compare(password, regulator.password);
-      if (!valid) {
-        return res.status(401).json({ error: 'Invalid email or password' });
-      }
-      const token = signToken({
-        userId: regulator.id,
-        email: regulator.email,
-        role: 'REGULATOR',
-        isExternal: true,
+    const hashToCompare = dbPassword || DUMMY_HASH;
+    const passwordMatch = await bcrypt.compare(password, hashToCompare);
+
+    if (!dbUserId || !passwordMatch) {
+      return res.status(401).json({
+        error: 'Invalid email or password',
+        code: 'INVALID_CREDENTIALS',
       });
-      return res.json({
-        token,
+    }
+
+    if (!isActive) {
+      return res.status(403).json({
+        error: 'Account is deactivated. Contact your administrator.',
+        code: 'ACCOUNT_INACTIVE',
+      });
+    }
+
+    const isExternal = role === 'CONTRACTOR' || role === 'REGULATOR';
+    const jwtPayload: JWTPayload = {
+      userId: dbUserId,
+      email: emailNormalized,
+      role: role!,
+      isExternal,
+      dbUserId,
+    };
+
+    const token = signToken(jwtPayload);
+    res.cookie(COOKIE_NAME, token, COOKIE_OPTIONS);
+
+    return res.json({
+      data: {
         user: {
-          id: regulator.id,
-          email: regulator.email,
-          displayName: regulator.displayName,
-          role: 'REGULATOR',
-          organisation: regulator.organisation,
-          isExternal: true,
+          id: dbUserId,
+          email: emailNormalized,
+          role,
+          displayName,
+          isExternal,
         },
-      });
-    }
-
-    return res.status(401).json({ error: 'Invalid email or password' });
+        token,
+      },
+      message: 'Login successful',
+    });
   } catch (err) {
-    return res.status(500).json({ error: 'Internal server error' });
+    return next(err);
   }
 };
 
-export const getMe = async (req: Request, res: Response) => {
+export const getMe = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    if (!req.user) return res.status(401).json({ error: 'Unauthorized' });
-    const role = req.user.role;
+    const { userId, role } = req.user!;
+
+    if (role === 'ADMIN' || role === 'INSPECTOR' || role === 'REGULATOR') {
+      const user = await prisma.user.findUnique({
+        where: { id: userId! },
+        select: {
+          id: true,
+          email: true,
+          role: true,
+          displayName: true,
+          isActive: true,
+        },
+      });
+      if (user) return res.json({ data: { ...user, isExternal: false } });
+    }
 
     if (role === 'CONTRACTOR') {
       const contractor = await prisma.contractor.findUnique({
-        where: { id: req.user.dbUserId },
-        select: { id: true, email: true, companyName: true, contractorId: true, isActive: true, createdAt: true },
+        where: { id: userId! },
+        select: {
+          id: true,
+          email: true,
+          companyName: true,
+          contractorId: true,
+          isActive: true,
+        },
       });
-      return res.json({ data: { ...contractor, role: 'CONTRACTOR' } });
+      return res.json({
+        data: {
+          ...contractor,
+          role: 'CONTRACTOR',
+          isExternal: true,
+          displayName: contractor?.companyName,
+        },
+      });
     }
 
     if (role === 'REGULATOR') {
       const regulator = await prisma.regulator.findUnique({
-        where: { id: req.user.dbUserId },
-        select: { id: true, email: true, displayName: true, organisation: true, isActive: true, createdAt: true },
+        where: { id: userId! },
+        select: {
+          id: true,
+          email: true,
+          displayName: true,
+          organisation: true,
+          isActive: true,
+        },
       });
-      return res.json({ data: { ...regulator, role: 'REGULATOR' } });
+      return res.json({
+        data: {
+          ...regulator,
+          role: 'REGULATOR',
+          isExternal: true,
+        },
+      });
     }
 
-    const user = await prisma.user.findUnique({
-      where: { id: req.user.dbUserId },
-      select: { id: true, email: true, displayName: true, role: true, isActive: true, createdAt: true },
-    });
-    return res.json({ data: user });
+    return res.status(400).json({ error: 'Unknown role' });
   } catch (err) {
-    return res.status(500).json({ error: 'Internal server error' });
+    return next(err);
+  }
+};
+
+export const logout = async (_req: Request, res: Response, next: NextFunction) => {
+  try {
+    res.clearCookie(COOKIE_NAME, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: process.env.NODE_ENV === 'production' ? 'strict' : 'lax',
+      path: '/',
+    });
+    return res.json({ message: 'Logged out successfully' });
+  } catch (err) {
+    return next(err);
   }
 };

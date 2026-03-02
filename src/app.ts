@@ -2,59 +2,89 @@ import dotenv from 'dotenv';
 
 dotenv.config();
 
+import cors from 'cors';
+import cookieParser from 'cookie-parser';
 import express from 'express';
 import helmet from 'helmet';
-import cors from 'cors';
 import morgan from 'morgan';
-import rateLimit from 'express-rate-limit';
 import swaggerUi from 'swagger-ui-express';
-import { authenticate } from './middleware/authenticate';
-import { errorHandler } from './middleware/errorHandler';
-import logger from './config/logger';
 import swaggerSpec from './config/swagger';
+import { generalRateLimiter } from './config/security';
+import { prisma } from './config/database';
+import { errorHandler } from './middleware/errorHandler';
+import { authenticate } from './middleware/authenticate';
+import { sanitizeRequestLogger } from './middleware/sanitizeLogger';
+import accessRequestsRouter from './routes/accessRequests.routes';
 import authRouter from './routes/auth.routes';
-import workOrdersRouter from './routes/workOrders.routes';
-import evidenceRouter from './routes/evidence.routes';
 import checklistsRouter from './routes/checklists.routes';
 import contractorsRouter from './routes/contractors.routes';
-import sitesRouter from './routes/sites.routes';
-import usersRouter from './routes/users.routes';
-import accessRequestsRouter from './routes/accessRequests.routes';
-import statsRouter from './routes/stats.routes';
-import reportsRouter from './routes/reports.routes';
+import evidenceRouter from './routes/evidence.routes';
 import regulatorsRouter from './routes/regulators.routes';
-import { prisma } from './config/database';
+import reportsRouter from './routes/reports.routes';
+import sitesRouter from './routes/sites.routes';
+import statsRouter from './routes/stats.routes';
+import usersRouter from './routes/users.routes';
+import workOrdersRouter from './routes/workOrders.routes';
 
 const app = express();
-const allowedOrigins = (process.env.CORS_ORIGIN || 'http://localhost:5175')
+
+app.use(
+  helmet({
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'self'"],
+        scriptSrc: ["'self'"],
+        styleSrc: ["'self'", "'unsafe-inline'"],
+        imgSrc: ["'self'", 'data:', 'https:'],
+        connectSrc: ["'self'"],
+        fontSrc: ["'self'"],
+        objectSrc: ["'none'"],
+        mediaSrc: ["'self'"],
+        frameSrc: ["'none'"],
+      },
+    },
+    crossOriginEmbedderPolicy: false,
+  })
+);
+
+app.use(cookieParser());
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+app.use(sanitizeRequestLogger);
+
+morgan.token('sanitized-body', (req: any) => {
+  if (!req.sanitizedBody || Object.keys(req.sanitizedBody).length === 0) {
+    return '';
+  }
+  return JSON.stringify(req.sanitizedBody);
+});
+
+const morganFormat =
+  process.env.NODE_ENV === 'production'
+    ? ':remote-addr :method :url :status :res[content-length] :response-time ms'
+    : ':method :url :status :response-time ms :sanitized-body';
+
+app.use(morgan(morganFormat));
+
+const allowedOrigins = (
+  process.env.ALLOWED_ORIGINS ||
+  process.env.CORS_ORIGIN ||
+  'http://localhost:5173'
+)
   .split(',')
   .map((origin) => origin.trim())
   .filter(Boolean);
 
-app.use(helmet());
 app.use(
   cors({
     origin: allowedOrigins,
     credentials: true,
+    methods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
   })
 );
 
-app.use(
-  rateLimit({
-    windowMs: 15 * 60 * 1000,
-    max: 100,
-    message: { error: 'Too many requests, please try again later.' },
-  })
-);
-
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ extended: true }));
-
-app.use(
-  morgan('combined', {
-    stream: { write: (message) => logger.info(message.trim()) },
-  })
-);
+app.use('/api/', generalRateLimiter);
 
 if (process.env.NODE_ENV !== 'production') {
   app.use((req, _res, next) => {

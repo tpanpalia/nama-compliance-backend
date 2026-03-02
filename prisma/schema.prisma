@@ -276,6 +276,7 @@ model AccessRequestDocument {
 enum UserRole {
   INSPECTOR
   ADMIN
+  REGULATOR
 }
 
 enum WorkOrderStatus {

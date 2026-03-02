@@ -1,15 +1,18 @@
-﻿import { Router } from 'express';
-import { login, getMe } from '../controllers/auth.controller';
+import express from 'express';
+import * as AuthController from '../controllers/auth.controller';
 import { authenticate } from '../middleware/authenticate';
+import { loginRateLimiter, loginSlowDown } from '../config/security';
 
-const router = Router();
+const router = express.Router();
 
 /**
  * @swagger
  * /api/v1/auth/login:
  *   post:
  *     summary: Login with email and password
- *     description: Checks User table (INSPECTOR/ADMIN), then Contractor (CONTRACTOR), then Regulator (REGULATOR). Returns JWT token and user info with role.
+ *     description: |
+ *       Returns user info. JWT token is set as httpOnly cookie.
+ *       Rate limited to 10 attempts per 15 minutes per IP+email.
  *     tags: [Auth]
  *     requestBody:
  *       required: true
@@ -22,51 +25,46 @@ const router = Router();
  *               email:
  *                 type: string
  *                 format: email
- *                 example: admin@nama.om
  *               password:
  *                 type: string
- *                 example: password123
+ *                 format: password
+ *                 description: Never logged server-side
  *     responses:
  *       200:
- *         description: Login successful — returns token and user with role
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 token:
- *                   type: string
- *                 user:
- *                   type: object
- *                   properties:
- *                     id:          { type: string }
- *                     email:       { type: string }
- *                     displayName: { type: string }
- *                     role:        { type: string, enum: [ADMIN, INSPECTOR, CONTRACTOR, REGULATOR] }
- *                     isExternal:  { type: boolean }
+ *         description: Login successful — token set in httpOnly cookie
+ *       400:
+ *         description: Missing or invalid fields
  *       401:
- *         description: Invalid email or password
+ *         description: Invalid credentials (generic — no enumeration)
  *       403:
  *         description: Account deactivated
+ *       429:
+ *         description: Too many login attempts
  */
-router.post('/login', login);
+router.post('/login', loginSlowDown, loginRateLimiter, AuthController.login);
 
 /**
  * @swagger
  * /api/v1/auth/me:
  *   get:
- *     summary: Get current user profile
- *     description: Returns the logged-in user's profile based on their JWT token role.
+ *     summary: Get current authenticated user
  *     tags: [Auth]
  *     security:
  *       - BearerAuth: []
- *     responses:
- *       200:
- *         description: Current user profile
- *       401:
- *         description: Not authenticated
+ *       - CookieAuth: []
  */
-router.get('/me', authenticate, getMe);
+router.get('/me', authenticate, AuthController.getMe);
+
+/**
+ * @swagger
+ * /api/v1/auth/logout:
+ *   post:
+ *     summary: Logout — clears auth cookie
+ *     tags: [Auth]
+ *     security:
+ *       - BearerAuth: []
+ *       - CookieAuth: []
+ */
+router.post('/logout', authenticate, AuthController.logout);
 
 export default router;
-
