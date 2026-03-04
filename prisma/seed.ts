@@ -340,7 +340,7 @@ async function main(): Promise<void> {
       siteKey: 'Al Khoud Extension',
       contractor: 'Al Noor Construction',
       inspector: 'Ahmed Al-Rashid',
-      overallScore: 87,
+      overallScore: 86,
       complianceBand: 'GOOD',
       startedAt: dateAt('2026-01-07'),
       submittedAt: dateAt('2026-01-09'),
@@ -515,8 +515,8 @@ async function main(): Promise<void> {
         data: {
           checklistId: checklist.id,
           itemId: items[i].id,
-          rating: i % 6 === 0 ? 'PARTIAL' : 'COMPLIANT',
-          comment: i % 6 === 0 ? 'Minor deviation corrected on site' : null,
+          rating: i === 0 ? 'NON_COMPLIANT' : i === 6 || i === 12 ? 'PARTIAL' : 'COMPLIANT',
+          comment: i === 0 || i === 6 || i === 12 ? 'Deviation noted during inspection' : null,
         },
       });
     }

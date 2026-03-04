@@ -260,8 +260,8 @@ export async function getContractorPerformance(id: string) {
 
   const POINTS: Record<string, number> = {
     COMPLIANT: 100,
-    PARTIAL: 67,
-    NON_COMPLIANT: 33,
+    PARTIAL: 50,
+    NON_COMPLIANT: 0,
   };
   const categoryTotals: Record<string, { sum: number; count: number }> = {};
 

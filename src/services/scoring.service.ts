@@ -28,8 +28,8 @@ const getBand = (score: number): ComplianceBand => {
 export const calculateComplianceScore = (input: ScoringInput): ComplianceScoreResult => {
   const POINTS: Record<string, number> = {
     COMPLIANT: 100,
-    PARTIAL: 67,
-    NON_COMPLIANT: 33,
+    PARTIAL: 50,
+    NON_COMPLIANT: 0,
   };
 
   const sections: Record<string, { weight: number; scores: number[] }> = {};

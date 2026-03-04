@@ -127,8 +127,8 @@ export async function getAdminDashboard(filters: DashboardFilters) {
       ROUND(AVG(
         CASE cr.rating
           WHEN 'COMPLIANT'     THEN 100
-          WHEN 'PARTIAL'       THEN 67
-          WHEN 'NON_COMPLIANT' THEN 33
+          WHEN 'PARTIAL'       THEN 50
+          WHEN 'NON_COMPLIANT' THEN 0
           ELSE NULL
         END
       )::numeric, 1)::float                           as "avgScore"

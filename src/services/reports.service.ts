@@ -19,8 +19,8 @@ export const SystemSummaryReportSchema = z.object({
 
 const POINTS: Record<string, number> = {
   COMPLIANT: 100,
-  PARTIAL: 67,
-  NON_COMPLIANT: 33,
+  PARTIAL: 50,
+  NON_COMPLIANT: 0,
 };
 
 function scoreColor(score: number): string {
@@ -427,8 +427,8 @@ export async function getSystemSummaryReportData(year?: number, month?: number) 
       ROUND(AVG(
         CASE cr.rating
           WHEN 'COMPLIANT'     THEN 100
-          WHEN 'PARTIAL'       THEN 67
-          WHEN 'NON_COMPLIANT' THEN 33
+          WHEN 'PARTIAL'       THEN 50
+          WHEN 'NON_COMPLIANT' THEN 0
         END
       )::numeric, 1)::float                                 as "avgScore",
       COUNT(cr.id)::int                                     as "itemCount"
