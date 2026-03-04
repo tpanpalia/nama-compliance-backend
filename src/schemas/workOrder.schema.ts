@@ -20,7 +20,11 @@ export const rejectWorkOrderSchema = z.object({
 });
 
 export const workOrderFilterSchema = z.object({
-  status: z.nativeEnum(WorkOrderStatus).optional(),
+  status: z.union([z.nativeEnum(WorkOrderStatus), z.array(z.nativeEnum(WorkOrderStatus)), z.string()]).optional(),
+  year: z.union([z.coerce.number().int(), z.array(z.coerce.number().int()), z.string(), z.array(z.string())]).optional(),
+  month: z
+    .union([z.coerce.number().int().min(1).max(12), z.array(z.coerce.number().int().min(1).max(12)), z.string(), z.array(z.string())])
+    .optional(),
   inspectorId: z.string().uuid().optional(),
   contractorId: z.string().uuid().optional(),
   siteId: z.string().uuid().optional(),

@@ -1,6 +1,8 @@
 import bcrypt from 'bcryptjs';
+import { Prisma } from '@prisma/client';
 import { z } from 'zod';
 import { prisma } from '../config/database';
+import { toNumberArray, toStringArray } from '../utils/queryFilters';
 import { AppError } from '../utils/AppError';
 
 export const UpdateContractorSchema = z.object({
@@ -95,16 +97,33 @@ export async function enrichContractor(contractor: {
 
 export async function listContractors(filters: {
   search?: string;
+  status?: string | string[];
   isActive?: boolean;
+  year?: string | string[];
+  month?: string | string[];
   page: number;
   limit: number;
   sortBy?: string;
   sortDir?: string;
 }) {
-  const { search, isActive, page, limit, sortBy, sortDir } = filters;
+  const { search, status, isActive, year, month, page, limit, sortBy, sortDir } = filters;
+  const normalizedStatuses = toStringArray(status).map((value) => value.toLowerCase());
+  const years = toNumberArray(year);
+  const months = toNumberArray(month);
 
-  const where: any = {
-    ...(isActive !== undefined && { isActive }),
+  const hasActive = normalizedStatuses.includes('active');
+  const hasInactive = normalizedStatuses.includes('inactive');
+  const statusFilter =
+    hasActive && hasInactive
+      ? undefined
+      : hasActive
+        ? true
+        : hasInactive
+          ? false
+          : isActive;
+
+  const where: Prisma.ContractorWhereInput = {
+    ...(statusFilter !== undefined && { isActive: statusFilter }),
     ...(search && {
       OR: [
         { companyName: { contains: search, mode: 'insensitive' } },
@@ -115,26 +134,67 @@ export async function listContractors(filters: {
     }),
   };
 
-  const contractors = await prisma.contractor.findMany({
-    where,
-    skip: (page - 1) * limit,
-    take: limit,
-    orderBy: { companyName: 'asc' },
-    select: {
-      id: true,
-      contractorId: true,
-      companyName: true,
-      email: true,
-      phone: true,
-      address: true,
-      contactName: true,
-      crNumber: true,
-      isActive: true,
-      createdAt: true,
-    },
-  });
+  const dateClauses: Prisma.ContractorWhereInput[] = [];
 
-  const total = await prisma.contractor.count({ where });
+  if (years.length) {
+    dateClauses.push({
+      OR: years.map((y) => ({
+        createdAt: {
+          gte: new Date(Date.UTC(y, 0, 1, 0, 0, 0)),
+          lt: new Date(Date.UTC(y + 1, 0, 1, 0, 0, 0)),
+        },
+      })),
+    });
+  }
+
+  if (months.length) {
+    if (years.length) {
+      const ymWindows: Prisma.ContractorWhereInput[] = [];
+      for (const y of years) {
+        for (const m of months) {
+          if (m >= 1 && m <= 12) {
+            ymWindows.push({
+              createdAt: {
+                gte: new Date(Date.UTC(y, m - 1, 1, 0, 0, 0)),
+                lt: new Date(Date.UTC(y, m, 1, 0, 0, 0)),
+              },
+            });
+          }
+        }
+      }
+      dateClauses.length = 0;
+      if (ymWindows.length) dateClauses.push({ OR: ymWindows });
+    } else {
+      // Month-only filtering without year is intentionally skipped.
+    }
+  }
+
+  if (dateClauses.length) {
+    where.AND = [...((where.AND as Prisma.ContractorWhereInput[]) ?? []), ...dateClauses];
+  }
+
+  const [contractors, total] = await prisma.$transaction([
+    prisma.contractor.findMany({
+      where,
+      skip: (page - 1) * limit,
+      take: limit,
+      orderBy: { companyName: 'asc' },
+      select: {
+        id: true,
+        contractorId: true,
+        companyName: true,
+        email: true,
+        phone: true,
+        address: true,
+        contactName: true,
+        crNumber: true,
+        isActive: true,
+        createdAt: true,
+      },
+    }),
+    prisma.contractor.count({ where }),
+  ]);
+
   const enriched = await Promise.all(contractors.map(enrichContractor));
 
   if (sortBy) {

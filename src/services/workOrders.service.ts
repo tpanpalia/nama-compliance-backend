@@ -1,5 +1,7 @@
 import { z } from 'zod';
+import { Prisma } from '@prisma/client';
 import { prisma } from '../config/database';
+import { toNumberArray, toStringArray } from '../utils/queryFilters';
 import { AppError } from '../utils/AppError';
 
 const OVERDUE_THRESHOLD_DAYS = 3;
@@ -71,39 +73,20 @@ export async function getWorkOrderStats() {
 }
 
 export async function listWorkOrders(filters: {
-  status?: string;
-  year?: number;
-  month?: number;
+  status?: string | string[];
+  year?: string | string[];
+  month?: string | string[];
   searchContractor?: string;
   searchInspector?: string;
   page: number;
   limit: number;
 }) {
   const { status, year, month, searchContractor, searchInspector, page, limit } = filters;
+  const statuses = toStringArray(status).map((value) => value.toUpperCase());
+  const years = toNumberArray(year);
+  const months = toNumberArray(month);
 
-  let statusFilter: any = undefined;
-  let overdueFilter: any = undefined;
-
-  if (status === 'OVERDUE') {
-    const cutoff = new Date(Date.now() - OVERDUE_THRESHOLD_DAYS * 24 * 60 * 60 * 1000);
-    statusFilter = 'SUBMITTED';
-    overdueFilter = { lt: cutoff };
-  } else if (status && status !== '') {
-    statusFilter = status;
-  }
-
-  const where: any = {
-    ...(statusFilter && { status: statusFilter }),
-    ...(overdueFilter && { submittedAt: overdueFilter }),
-  };
-
-  if (year || month) {
-    const gte = new Date(year || 2020, (month || 1) - 1, 1);
-    const lte = month
-      ? new Date(year || 2030, month, 0, 23, 59, 59)
-      : new Date((year || 2030) + 1, 0, 0, 23, 59, 59);
-    where.createdAt = { gte, lte };
-  }
+  const where: Prisma.WorkOrderWhereInput = {};
 
   if (searchContractor) {
     where.contractor = {
@@ -119,6 +102,49 @@ export async function listWorkOrders(filters: {
     where.inspector = {
       displayName: { contains: searchInspector, mode: 'insensitive' },
     };
+  }
+
+  if (statuses.length) {
+    where.status = { in: statuses as any };
+  }
+
+  const dateClauses: Prisma.WorkOrderWhereInput[] = [];
+
+  if (years.length) {
+    dateClauses.push({
+      OR: years.map((y) => ({
+        createdAt: {
+          gte: new Date(Date.UTC(y, 0, 1, 0, 0, 0)),
+          lt: new Date(Date.UTC(y + 1, 0, 1, 0, 0, 0)),
+        },
+      })),
+    });
+  }
+
+  if (months.length) {
+    if (years.length) {
+      const ymWindows: Prisma.WorkOrderWhereInput[] = [];
+      for (const y of years) {
+        for (const m of months) {
+          if (m >= 1 && m <= 12) {
+            ymWindows.push({
+              createdAt: {
+                gte: new Date(Date.UTC(y, m - 1, 1, 0, 0, 0)),
+                lt: new Date(Date.UTC(y, m, 1, 0, 0, 0)),
+              },
+            });
+          }
+        }
+      }
+      dateClauses.length = 0;
+      if (ymWindows.length) dateClauses.push({ OR: ymWindows });
+    } else {
+      // Month-only filtering without year is intentionally skipped.
+    }
+  }
+
+  if (dateClauses.length) {
+    where.AND = [...((where.AND as Prisma.WorkOrderWhereInput[]) ?? []), ...dateClauses];
   }
 
   const [workOrders, total] = await prisma.$transaction([

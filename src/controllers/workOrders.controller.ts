@@ -9,9 +9,9 @@ import {
 export const list = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const result = await WorkOrdersService.listWorkOrders({
-      status: req.query.status as string,
-      year: req.query.year ? parseInt(req.query.year as string, 10) : undefined,
-      month: req.query.month ? parseInt(req.query.month as string, 10) : undefined,
+      status: req.query.status as string | string[] | undefined,
+      year: req.query.year as string | string[] | undefined,
+      month: req.query.month as string | string[] | undefined,
       searchContractor: req.query.searchContractor as string,
       searchInspector: req.query.searchInspector as string,
       page: parseInt(req.query.page as string, 10) || 1,

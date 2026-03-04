@@ -6,7 +6,13 @@ export const list = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const result = await ContractorsService.listContractors({
       search: req.query.search as string,
-      isActive: req.query.isActive !== undefined ? req.query.isActive === 'true' : undefined,
+      status: req.query.status as string | string[] | undefined,
+      isActive:
+        req.query.isActive !== undefined
+          ? (Array.isArray(req.query.isActive) ? req.query.isActive[0] : req.query.isActive) === 'true'
+          : undefined,
+      year: req.query.year as string | string[] | undefined,
+      month: req.query.month as string | string[] | undefined,
       page: parseInt(req.query.page as string, 10) || 1,
       limit: parseInt(req.query.limit as string, 10) || 20,
       sortBy: req.query.sortBy as string,
