@@ -1,7 +1,3 @@
-import dotenv from 'dotenv';
-
-dotenv.config();
-
 import cors from 'cors';
 import cookieParser from 'cookie-parser';
 import express from 'express';
@@ -12,6 +8,7 @@ import swaggerSpec from './config/swagger';
 import { generalRateLimiter } from './config/security';
 import { prisma } from './config/database';
 import { errorHandler } from './middleware/errorHandler';
+import { errorResponseNormalizer } from './middleware/errorResponseNormalizer';
 import { authenticate } from './middleware/authenticate';
 import { sanitizeRequestLogger } from './middleware/sanitizeLogger';
 import accessRequestsRouter from './routes/accessRequests.routes';
@@ -85,6 +82,7 @@ app.use(
 );
 
 app.use('/api/', generalRateLimiter);
+app.use(errorResponseNormalizer);
 
 if (process.env.NODE_ENV !== 'production') {
   app.use((req, _res, next) => {
@@ -168,7 +166,7 @@ app.use('/api/v1/reports', reportsRouter);
 app.use('/api/v1/regulators', authenticate, regulatorsRouter);
 
 app.use((_req, res) => {
-  res.status(404).json({ error: 'Route not found' });
+  res.status(404).json({ code: 'ROUTE_NOT_FOUND', error: 'Route not found' });
 });
 
 app.use(errorHandler);

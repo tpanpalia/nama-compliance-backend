@@ -1,3 +1,4 @@
+import '../src/config/loadEnv';
 import bcrypt from 'bcryptjs';
 import { PrismaClient, UserRole } from '@prisma/client';
 

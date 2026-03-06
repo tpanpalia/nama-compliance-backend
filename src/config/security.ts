@@ -1,5 +1,6 @@
 import rateLimit from 'express-rate-limit';
 import slowDown from 'express-slow-down';
+import { buildErrorResponse } from '../utils/errorResponse';
 
 export const loginRateLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
@@ -7,9 +8,15 @@ export const loginRateLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   skipSuccessfulRequests: true,
-  message: {
-    error: 'Too many login attempts. Please try again in 15 minutes.',
-    code: 'RATE_LIMIT_EXCEEDED',
+  handler: (req, res) => {
+    res.status(429).json(
+      buildErrorResponse(
+        req,
+        429,
+        'RATE_LIMIT_EXCEEDED',
+        'Too many login attempts. Please try again in 15 minutes.'
+      )
+    );
   },
   keyGenerator: (req) => {
     const email = typeof req.body?.email === 'string' ? req.body.email : '';
@@ -30,8 +37,7 @@ export const generalRateLimiter = rateLimit({
   max: 300,
   standardHeaders: true,
   legacyHeaders: false,
-  message: {
-    error: 'Too many requests. Please slow down.',
-    code: 'RATE_LIMIT_EXCEEDED',
+  handler: (req, res) => {
+    res.status(429).json(buildErrorResponse(req, 429, 'RATE_LIMIT_EXCEEDED', 'Too many requests. Please slow down.'));
   },
 });

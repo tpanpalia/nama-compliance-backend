@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import { COOKIE_NAME, verifyToken } from '../config/auth';
+import { sendError } from '../utils/errorResponse';
 
 export function authenticate(req: Request, res: Response, next: NextFunction) {
   let token: string | undefined;
@@ -16,10 +17,7 @@ export function authenticate(req: Request, res: Response, next: NextFunction) {
   }
 
   if (!token) {
-    return res.status(401).json({
-      error: 'Authentication required',
-      code: 'NO_TOKEN',
-    });
+    return sendError(res, req, 401, 'NO_TOKEN', 'Authentication required');
   }
 
   try {
@@ -33,9 +31,6 @@ export function authenticate(req: Request, res: Response, next: NextFunction) {
     };
     return next();
   } catch (_err) {
-    return res.status(401).json({
-      error: 'Session expired. Please log in again.',
-      code: 'INVALID_TOKEN',
-    });
+    return sendError(res, req, 401, 'INVALID_TOKEN', 'Session expired. Please log in again.');
   }
 }
