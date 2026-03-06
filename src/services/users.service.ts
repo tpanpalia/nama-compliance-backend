@@ -7,7 +7,7 @@ export const CreateUserSchema = z.object({
   email: z.string().email(),
   password: z.string().min(8),
   displayName: z.string().min(2),
-  role: z.enum(['INSPECTOR', 'ADMIN']),
+  role: z.enum(['INSPECTOR', 'ADMIN', 'CONTRACTOR']),
 });
 
 export const UpdateUserStatusSchema = z.object({

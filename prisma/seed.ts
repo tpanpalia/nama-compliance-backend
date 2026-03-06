@@ -167,6 +167,23 @@ async function main(): Promise<void> {
   }
 
   await prisma.user.upsert({
+    where: { email: 'contractor@test.com' },
+    update: {
+      displayName: 'Test Contractor',
+      password: hash,
+      role: UserRole.CONTRACTOR,
+      isActive: true,
+    },
+    create: {
+      email: 'contractor@test.com',
+      password: hash,
+      displayName: 'Test Contractor',
+      role: UserRole.CONTRACTOR,
+      isActive: true,
+    },
+  });
+
+  await prisma.user.upsert({
     where: { email: 'inspector@apsr.om' },
     update: {
       displayName: 'Khalid Al-Farsi',

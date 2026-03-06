@@ -150,18 +150,23 @@ export const getMe = async (req: Request, res: Response, next: NextFunction) => 
   try {
     const { userId, role } = req.user!;
 
-    if (role === 'ADMIN' || role === 'INSPECTOR' || role === 'REGULATOR') {
-      const user = await prisma.user.findUnique({
-        where: { id: userId! },
-        select: {
-          id: true,
-          email: true,
-          role: true,
-          displayName: true,
-          isActive: true,
+    const user = await prisma.user.findUnique({
+      where: { id: userId! },
+      select: {
+        id: true,
+        email: true,
+        role: true,
+        displayName: true,
+        isActive: true,
+      },
+    });
+    if (user) {
+      return res.json({
+        data: {
+          ...user,
+          isExternal: user.role === 'CONTRACTOR' || user.role === 'REGULATOR',
         },
       });
-      if (user) return res.json({ data: { ...user, isExternal: false } });
     }
 
     if (role === 'CONTRACTOR') {
