@@ -53,6 +53,30 @@ const DETAIL_INCLUDE = {
   evidence: true,
 };
 
+function getContractorAllowedActions(status: string) {
+  if (status === 'ASSIGNED') {
+    return {
+      startWork: true,
+      uploadEvidence: false,
+      submitWork: false,
+    };
+  }
+
+  if (status === 'IN_PROGRESS') {
+    return {
+      startWork: false,
+      uploadEvidence: true,
+      submitWork: true,
+    };
+  }
+
+  return {
+    startWork: false,
+    uploadEvidence: false,
+    submitWork: false,
+  };
+}
+
 export async function getWorkOrderStats() {
   const now = new Date();
   const overdueCutoff = new Date(now.getTime() - OVERDUE_THRESHOLD_DAYS * 24 * 60 * 60 * 1000);
@@ -73,6 +97,8 @@ export async function getWorkOrderStats() {
 }
 
 export async function listWorkOrders(filters: {
+  userRole?: string;
+  userEmail?: string;
   status?: string | string[];
   year?: string | string[];
   month?: string | string[];
@@ -81,14 +107,35 @@ export async function listWorkOrders(filters: {
   page: number;
   limit: number;
 }) {
-  const { status, year, month, searchContractor, searchInspector, page, limit } = filters;
+  const { userRole, userEmail, status, year, month, searchContractor, searchInspector, page, limit } = filters;
   const statuses = toStringArray(status).map((value) => value.toUpperCase());
   const years = toNumberArray(year);
   const months = toNumberArray(month);
+  const normalizedPage = Math.max(1, page);
+  const normalizedLimit = Math.max(1, Math.min(limit, 100));
 
   const where: Prisma.WorkOrderWhereInput = {};
 
-  if (searchContractor) {
+  if (userRole === 'CONTRACTOR') {
+    const contractor = await prisma.contractor.findUnique({
+      where: { email: userEmail },
+      select: { id: true },
+    });
+
+    if (!contractor) {
+      throw new AppError('Forbidden', 403, 'FORBIDDEN');
+    }
+
+    const contractorStatuses = ['ASSIGNED', 'IN_PROGRESS', 'SUBMITTED'] as const;
+    where.contractorId = contractor.id;
+    where.status = {
+      in: statuses.length
+        ? contractorStatuses.filter((value) => statuses.includes(value))
+        : [...contractorStatuses],
+    };
+  }
+
+  if (searchContractor && userRole !== 'CONTRACTOR') {
     where.contractor = {
       OR: [
         { companyName: { contains: searchContractor, mode: 'insensitive' } },
@@ -104,7 +151,7 @@ export async function listWorkOrders(filters: {
     };
   }
 
-  if (statuses.length) {
+  if (statuses.length && userRole !== 'CONTRACTOR') {
     where.status = { in: statuses as any };
   }
 
@@ -151,26 +198,112 @@ export async function listWorkOrders(filters: {
     prisma.workOrder.findMany({
       where,
       include: LIST_INCLUDE,
-      skip: (page - 1) * limit,
-      take: limit,
+      skip: (normalizedPage - 1) * normalizedLimit,
+      take: normalizedLimit,
       orderBy: { createdAt: 'desc' },
     }),
     prisma.workOrder.count({ where }),
   ]);
 
-  const stats = await getWorkOrderStats();
+  const stats = userRole === 'CONTRACTOR' ? undefined : await getWorkOrderStats();
 
   return {
     data: workOrders.map((wo) => ({
       ...wo,
       displayStatus: computeDisplayStatus(wo),
     })),
-    pagination: { page, limit, total, totalPages: Math.ceil(total / limit) },
-    stats,
+    pagination: { page: normalizedPage, limit: normalizedLimit, total, totalPages: Math.ceil(total / normalizedLimit) },
+    ...(stats ? { stats } : {}),
   };
 }
 
-export async function getWorkOrderById(id: string) {
+export async function getWorkOrderById(
+  id: string,
+  context?: {
+    userRole?: string;
+    userEmail?: string;
+  }
+) {
+  if (context?.userRole === 'CONTRACTOR') {
+    const contractor = await prisma.contractor.findUnique({
+      where: { email: context.userEmail },
+      select: { id: true },
+    });
+
+    if (!contractor) {
+      throw new AppError('Forbidden', 403, 'FORBIDDEN');
+    }
+
+    const workOrder = await prisma.workOrder.findFirst({
+      where: {
+        id,
+        contractorId: contractor.id,
+        status: { in: ['ASSIGNED', 'IN_PROGRESS', 'SUBMITTED'] },
+      },
+      select: {
+        id: true,
+        reference: true,
+        title: true,
+        description: true,
+        status: true,
+        scheduledDate: true,
+        startedAt: true,
+        submittedAt: true,
+        site: {
+          select: {
+            name: true,
+            location: true,
+            latitude: true,
+            longitude: true,
+          },
+        },
+        inspector: {
+          select: {
+            displayName: true,
+          },
+        },
+        evidence: {
+          select: {
+            id: true,
+            type: true,
+            source: true,
+            fileName: true,
+            fileSize: true,
+            mimeType: true,
+            latitude: true,
+            longitude: true,
+            accuracy: true,
+            capturedAt: true,
+            uploadedAt: true,
+          },
+          orderBy: { uploadedAt: 'desc' },
+        },
+      },
+    });
+
+    if (!workOrder) {
+      throw new AppError('Work order not found', 404);
+    }
+
+    return {
+      ...workOrder,
+      site: workOrder.site
+        ? {
+            name: workOrder.site.name,
+            location: workOrder.site.location,
+            latitude: workOrder.site.latitude,
+            longitude: workOrder.site.longitude,
+          }
+        : null,
+      inspector: workOrder.inspector
+        ? {
+            displayName: workOrder.inspector.displayName,
+          }
+        : null,
+      allowedActions: getContractorAllowedActions(workOrder.status),
+    };
+  }
+
   const wo = await prisma.workOrder.findUnique({
     where: { id },
     include: DETAIL_INCLUDE,
@@ -338,12 +471,82 @@ export async function assignInspector(workOrderId: string, inspectorId: string) 
   return { ...updated, displayStatus: computeDisplayStatus(updated) };
 }
 
-async function logAction(workOrderId: string, action: string, details: string) {
+async function logAction(workOrderId: string, action: string, details: string, userId?: string) {
   await prisma.auditLog
     .create({
-      data: { workOrderId, action, newValue: { details } as any },
+      data: { workOrderId, userId, action, newValue: { details } as any },
     })
     .catch(() => {});
+}
+
+export async function startWorkOrder(workOrderId: string, contractorEmail: string, actorId?: string) {
+  const contractor = await prisma.contractor.findUnique({
+    where: { email: contractorEmail },
+    select: { id: true },
+  });
+
+  if (!contractor) {
+    throw new AppError('Forbidden', 403, 'FORBIDDEN');
+  }
+
+  const workOrder = await prisma.workOrder.findFirst({
+    where: {
+      id: workOrderId,
+      contractorId: contractor.id,
+    },
+    select: {
+      id: true,
+      isLocked: true,
+      status: true,
+    },
+  });
+
+  if (!workOrder) {
+    throw new AppError('Work order not found', 404);
+  }
+
+  if (workOrder.isLocked) {
+    throw new AppError('Work order is locked', 400);
+  }
+
+  if (workOrder.status !== 'ASSIGNED') {
+    throw new AppError('Only assigned work orders can be started', 400);
+  }
+
+  const startedAt = new Date();
+  const updated = await prisma.workOrder.update({
+    where: { id: workOrderId },
+    data: {
+      status: 'IN_PROGRESS',
+      startedAt,
+    },
+    select: {
+      id: true,
+      status: true,
+      startedAt: true,
+    },
+  });
+
+  let auditUserId: string | undefined;
+
+  if (actorId) {
+    const actor = await prisma.user.findUnique({
+      where: { id: actorId },
+      select: { id: true },
+    });
+    auditUserId = actor?.id;
+  }
+
+  if (!auditUserId) {
+    const actorByEmail = await prisma.user.findUnique({
+      where: { email: contractorEmail },
+      select: { id: true },
+    });
+    auditUserId = actorByEmail?.id;
+  }
+
+  await logAction(workOrderId, 'WORK_ORDER_STARTED', 'Contractor started work order', auditUserId);
+  return updated;
 }
 
 export async function approveWorkOrder(workOrderId: string, approvedById: string) {

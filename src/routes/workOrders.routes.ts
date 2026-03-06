@@ -42,7 +42,11 @@ const router = Router();
  *       200:
  *         description: Paginated work orders and dashboard stats
  */
-router.get('/', authorize(UserRole.ADMIN, UserRole.INSPECTOR, EXTERNAL_USER_ROLES.REGULATOR), workOrdersController.list);
+router.get(
+  '/',
+  authorize(UserRole.ADMIN, UserRole.INSPECTOR, EXTERNAL_USER_ROLES.CONTRACTOR, EXTERNAL_USER_ROLES.REGULATOR),
+  workOrdersController.list
+);
 
 /**
  * @swagger
@@ -105,7 +109,7 @@ router.get('/stats', authorize(UserRole.ADMIN, UserRole.INSPECTOR), workOrdersCo
  */
 router.get(
   '/:id',
-  authorize(UserRole.ADMIN, UserRole.INSPECTOR, EXTERNAL_USER_ROLES.REGULATOR),
+  authorize(UserRole.ADMIN, UserRole.INSPECTOR, EXTERNAL_USER_ROLES.CONTRACTOR, EXTERNAL_USER_ROLES.REGULATOR),
   validate({ params: idParamSchema }),
   workOrdersController.getById
 );
@@ -174,6 +178,30 @@ router.patch(
   authorize(UserRole.ADMIN),
   validate({ params: idParamSchema }),
   workOrdersController.assignInspector
+);
+
+/**
+ * @swagger
+ * /api/v1/work-orders/{id}/start:
+ *   patch:
+ *     summary: Start assigned work order (CONTRACTOR only)
+ *     tags: [Work Orders]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string }
+ *     responses:
+ *       200:
+ *         description: Work order moved to in progress
+ */
+router.patch(
+  '/:id/start',
+  authorize(EXTERNAL_USER_ROLES.CONTRACTOR),
+  validate({ params: idParamSchema }),
+  workOrdersController.start
 );
 
 /**
