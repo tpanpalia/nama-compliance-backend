@@ -1,13 +1,11 @@
 import { EvidenceSource } from '@prisma/client';
 import { NextFunction, Request, Response } from 'express';
+import { prisma } from '../config/database';
 import { confirmUpload, deleteEvidence, listEvidenceForWorkOrder, requestUpload } from '../services/evidence.service';
 
 export const getEvidenceByWorkOrder = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
-    const data = await listEvidenceForWorkOrder(req.params.workOrderId, {
-      role: req.user?.role,
-      email: req.user?.email,
-    });
+    const data = await listEvidenceForWorkOrder(req.params.workOrderId);
     res.json({ data, message: 'Evidence fetched successfully' });
   } catch (error) {
     next(error);
@@ -27,8 +25,6 @@ export const requestPresignedUpload = async (req: Request, res: Response, next: 
       latitude: req.body.latitude,
       longitude: req.body.longitude,
       accuracy: req.body.accuracy,
-      actorRole: req.user?.role,
-      actorEmail: req.user?.email,
     });
 
     res.status(201).json({ data, message: 'Upload URL generated successfully' });
@@ -39,10 +35,7 @@ export const requestPresignedUpload = async (req: Request, res: Response, next: 
 
 export const confirmEvidenceUpload = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
-    const data = await confirmUpload(req.body.evidenceId, req.params.workOrderId, req.body.key, {
-      role: req.user?.role,
-      email: req.user?.email,
-    });
+    const data = await confirmUpload(req.body.evidenceId, req.body.key);
     res.json({ data, message: 'Upload confirmed successfully' });
   } catch (error) {
     next(error);
@@ -51,12 +44,15 @@ export const confirmEvidenceUpload = async (req: Request, res: Response, next: N
 
 export const deleteEvidenceHandler = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
-    const data = await deleteEvidence(req.params.evidenceId, {
-      role: req.user?.role,
-      email: req.user?.email,
-      dbUserId: req.user?.dbUserId,
-      isExternal: req.user?.isExternal,
-    });
+    const evidence = await prisma.evidence.findUniqueOrThrow({ where: { id: req.params.evidenceId } });
+    if (req.user?.role === 'CONTRACTOR') {
+      const contractor = await prisma.workOrder.findUnique({ where: { id: evidence.workOrderId }, select: { contractorId: true } });
+      if (contractor?.contractorId !== req.user.dbUserId) {
+        res.status(403).json({ error: 'Forbidden' });
+        return;
+      }
+    }
+    const data = await deleteEvidence(req.params.evidenceId, req.user?.dbUserId, req.user?.isExternal);
     res.json({ data, message: 'Evidence deleted successfully' });
   } catch (error) {
     next(error);

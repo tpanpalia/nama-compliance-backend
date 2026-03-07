@@ -1,5 +1,4 @@
 import { prisma } from '../config/database';
-import { AppError } from '../utils/AppError';
 
 interface DashboardFilters {
   year?: number;
@@ -343,46 +342,21 @@ export async function getInspectorDashboard(inspectorId: string) {
   };
 }
 
-export async function getContractorDashboard(email: string) {
-  const contractor = await prisma.contractor.findUnique({
-    where: { email },
-    select: { id: true },
-  });
-
-  if (!contractor) {
-    throw new AppError('Forbidden', 403, 'FORBIDDEN');
-  }
-
-  const contractorVisibleStatuses = ['ASSIGNED', 'IN_PROGRESS', 'SUBMITTED'] as const;
-
-  const [assigned, inProgress, submitted, recentWorkOrders] = await Promise.all([
-    prisma.workOrder.count({ where: { contractorId: contractor.id, status: 'ASSIGNED' } }),
-    prisma.workOrder.count({ where: { contractorId: contractor.id, status: 'IN_PROGRESS' } }),
-    prisma.workOrder.count({ where: { contractorId: contractor.id, status: 'SUBMITTED' } }),
-    prisma.workOrder.findMany({
-      where: {
-        contractorId: contractor.id,
-        status: { in: [...contractorVisibleStatuses] },
-      },
-      select: {
-        id: true,
-        reference: true,
-        title: true,
-        status: true,
-        scheduledDate: true,
-        site: {
-          select: { name: true },
-        },
-      },
-      orderBy: { createdAt: 'desc' },
-      take: 5,
+export async function getContractorDashboard(contractorId: string) {
+  const [assigned, submitted, completed, avgResult] = await Promise.all([
+    prisma.workOrder.count({ where: { contractorId, status: 'ASSIGNED' } }),
+    prisma.workOrder.count({ where: { contractorId, status: 'SUBMITTED' } }),
+    prisma.workOrder.count({ where: { contractorId, status: 'APPROVED' } }),
+    prisma.workOrder.aggregate({
+      where: { contractorId, overallScore: { not: null } },
+      _avg: { overallScore: true },
     }),
   ]);
 
   return {
     assigned,
-    inProgress,
     submitted,
-    recentWorkOrders,
+    completed,
+    avgScore: Math.round((avgResult._avg.overallScore || 0) * 10) / 10,
   };
 }

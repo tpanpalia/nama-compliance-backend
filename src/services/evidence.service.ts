@@ -1,6 +1,5 @@
 import { EvidenceSource, EvidenceType } from '@prisma/client';
 import { prisma } from '../config/database';
-import { AppError } from '../utils/AppError';
 import {
   MAX_PHOTO_SIZE_BYTES,
   MAX_PHOTOS_PER_WORKORDER,
@@ -9,69 +8,7 @@ import {
 } from '../types';
 import { buildEvidenceKey, deleteObject, generateUploadPresignedUrl, getObjectMetadata } from './s3.service';
 
-async function resolveContractor(workOrderId: string, contractorEmail?: string) {
-  const contractor = await prisma.contractor.findUnique({
-    where: { email: contractorEmail },
-    select: { id: true },
-  });
-
-  if (!contractor) {
-    throw new AppError('Forbidden', 403, 'FORBIDDEN');
-  }
-
-  const workOrder = await prisma.workOrder.findFirst({
-    where: {
-      id: workOrderId,
-      contractorId: contractor.id,
-    },
-    select: {
-      id: true,
-      status: true,
-      isLocked: true,
-    },
-  });
-
-  if (!workOrder) {
-    throw new AppError('Work order not found', 404, 'NOT_FOUND');
-  }
-
-  return { contractor, workOrder };
-}
-
-async function resolveAuditUserId(actor?: { dbUserId?: string; email?: string }) {
-  if (actor?.dbUserId) {
-    const user = await prisma.user.findUnique({
-      where: { id: actor.dbUserId },
-      select: { id: true },
-    });
-    if (user) return user.id;
-  }
-
-  if (actor?.email) {
-    const user = await prisma.user.findUnique({
-      where: { email: actor.email },
-      select: { id: true },
-    });
-    return user?.id;
-  }
-
-  return undefined;
-}
-
-export const listEvidenceForWorkOrder = async (
-  workOrderId: string,
-  actor?: {
-    role?: string;
-    email?: string;
-  }
-) => {
-  if (actor?.role === 'CONTRACTOR') {
-    const { workOrder } = await resolveContractor(workOrderId, actor.email);
-    if (!['ASSIGNED', 'IN_PROGRESS', 'SUBMITTED'].includes(workOrder.status)) {
-      throw new AppError('Work order not found', 404, 'NOT_FOUND');
-    }
-  }
-
+export const listEvidenceForWorkOrder = async (workOrderId: string) => {
   const evidence = await prisma.evidence.findMany({
     where: { workOrderId },
     orderBy: { uploadedAt: 'desc' },
@@ -93,26 +30,17 @@ export const requestUpload = async (params: {
   latitude?: number;
   longitude?: number;
   accuracy?: number;
-  actorRole?: string;
-  actorEmail?: string;
 }) => {
   const workOrder = await prisma.workOrder.findUniqueOrThrow({ where: { id: params.workOrderId } });
   if (workOrder.isLocked) {
-    throw new AppError('Work order is locked and cannot be modified', 400, 'WORK_ORDER_LOCKED');
-  }
-
-  if (params.source === EvidenceSource.CONTRACTOR) {
-    const { workOrder: contractorWorkOrder } = await resolveContractor(params.workOrderId, params.actorEmail);
-    if (contractorWorkOrder.status !== 'IN_PROGRESS') {
-      throw new AppError('Contractor can upload evidence only for in-progress work orders', 400, 'INVALID_WORK_ORDER_STATUS');
-    }
+    throw new Error('Work order is locked and cannot be modified');
   }
 
   if (params.fileType === EvidenceType.PHOTO && params.fileSize > MAX_PHOTO_SIZE_BYTES) {
-    throw new AppError('Photo exceeds max size limit', 400, 'FILE_TOO_LARGE');
+    throw new Error('Photo exceeds max size limit');
   }
   if (params.fileType === EvidenceType.VIDEO && params.fileSize > MAX_VIDEO_SIZE_BYTES) {
-    throw new AppError('Video exceeds max size limit', 400, 'FILE_TOO_LARGE');
+    throw new Error('Video exceeds max size limit');
   }
 
   const [photoCount, videoCount] = await Promise.all([
@@ -121,14 +49,14 @@ export const requestUpload = async (params: {
   ]);
 
   if (params.fileType === EvidenceType.PHOTO && photoCount >= MAX_PHOTOS_PER_WORKORDER) {
-    throw new AppError('Max photo count reached', 400, 'LIMIT_REACHED');
+    throw new Error('Max photo count reached');
   }
   if (params.fileType === EvidenceType.VIDEO && videoCount >= MAX_VIDEOS_PER_WORKORDER) {
-    throw new AppError('Max video count reached', 400, 'LIMIT_REACHED');
+    throw new Error('Max video count reached');
   }
 
   if (params.source === EvidenceSource.CONTRACTOR && (params.latitude === undefined || params.longitude === undefined || params.accuracy === undefined)) {
-    throw new AppError('Contractor evidence requires GPS coordinates and accuracy', 400, 'GPS_REQUIRED');
+    throw new Error('Contractor evidence requires GPS coordinates and accuracy');
   }
 
   const key = buildEvidenceKey(params.workOrderId, params.contentType);
@@ -157,39 +85,7 @@ export const requestUpload = async (params: {
   };
 };
 
-export const confirmUpload = async (
-  evidenceId: string,
-  workOrderId: string,
-  key: string,
-  actor?: {
-    role?: string;
-    email?: string;
-  }
-) => {
-  const evidence = await prisma.evidence.findUnique({
-    where: { id: evidenceId },
-    select: {
-      id: true,
-      workOrderId: true,
-      source: true,
-      s3Key: true,
-    },
-  });
-
-  if (!evidence || evidence.workOrderId !== workOrderId || evidence.s3Key !== key) {
-    throw new AppError('Evidence not found', 404, 'NOT_FOUND');
-  }
-
-  if (actor?.role === 'CONTRACTOR') {
-    const { workOrder } = await resolveContractor(workOrderId, actor.email);
-    if (workOrder.status !== 'IN_PROGRESS') {
-      throw new AppError('Contractor can confirm evidence only for in-progress work orders', 400, 'INVALID_WORK_ORDER_STATUS');
-    }
-    if (evidence.source !== EvidenceSource.CONTRACTOR) {
-      throw new AppError('Forbidden', 403, 'FORBIDDEN');
-    }
-  }
-
+export const confirmUpload = async (evidenceId: string, key: string) => {
   const metadata = await getObjectMetadata(key);
   return prisma.evidence.update({
     where: { id: evidenceId },
@@ -201,56 +97,26 @@ export const confirmUpload = async (
   });
 };
 
-export const deleteEvidence = async (
-  evidenceId: string,
-  actor?: {
-    role?: string;
-    email?: string;
-    dbUserId?: string;
-    isExternal?: boolean;
-  }
-) => {
+export const deleteEvidence = async (evidenceId: string, actorId?: string, isExternal?: boolean) => {
   const evidence = await prisma.evidence.findUniqueOrThrow({
     where: { id: evidenceId },
     include: { workOrder: true },
   });
 
   if (evidence.workOrder.isLocked) {
-    throw new AppError('Work order is locked and cannot be modified', 400, 'WORK_ORDER_LOCKED');
+    throw new Error('Work order is locked and cannot be modified');
   }
 
-  if (actor?.role === 'CONTRACTOR') {
-    const { workOrder } = await resolveContractor(evidence.workOrderId, actor.email);
-    if (evidence.source !== EvidenceSource.CONTRACTOR) {
-      throw new AppError('Contractor can delete only contractor evidence', 403, 'FORBIDDEN');
-    }
-    if (workOrder.status === 'SUBMITTED') {
-      throw new AppError('Submitted work order evidence cannot be deleted', 400, 'INVALID_WORK_ORDER_STATUS');
-    }
+  if (isExternal && evidence.source !== EvidenceSource.CONTRACTOR) {
+    throw new Error('Contractor can delete only contractor evidence');
   }
 
-  if (actor?.role === 'INSPECTOR' && evidence.source !== EvidenceSource.INSPECTOR) {
-    throw new AppError('Inspector can delete only inspector evidence', 403, 'FORBIDDEN');
+  if (!isExternal && evidence.source !== EvidenceSource.INSPECTOR) {
+    throw new Error('Inspector can delete only inspector evidence');
   }
 
   await deleteObject(evidence.s3Key);
-  const auditUserId = await resolveAuditUserId(actor);
-  await prisma.$transaction([
-    prisma.auditLog.create({
-      data: {
-        userId: auditUserId,
-        workOrderId: evidence.workOrderId,
-        action: 'EVIDENCE_DELETED',
-        newValue: {
-          evidenceId: evidence.id,
-          type: evidence.type,
-          source: evidence.source,
-          fileName: evidence.fileName,
-        } as any,
-      },
-    }),
-    prisma.evidence.delete({ where: { id: evidenceId } }),
-  ]);
+  await prisma.evidence.delete({ where: { id: evidenceId } });
 
-  return { deleted: true, evidenceId };
+  return { deleted: true, evidenceId, actorId };
 };

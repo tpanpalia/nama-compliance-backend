@@ -5,7 +5,6 @@ export const dashboard = async (req: Request, res: Response, next: NextFunction)
   try {
     const role = req.user!.role as string;
     const userId = req.user!.dbUserId!;
-    const email = req.user!.email;
 
     let data;
     switch (role) {
@@ -19,7 +18,7 @@ export const dashboard = async (req: Request, res: Response, next: NextFunction)
         data = await StatsService.getInspectorDashboard(userId);
         break;
       case 'CONTRACTOR':
-        data = await StatsService.getContractorDashboard(email);
+        data = await StatsService.getContractorDashboard(userId);
         break;
       case 'REGULATOR':
         data = await StatsService.getRegulatorDashboard();
