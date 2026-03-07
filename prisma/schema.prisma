@@ -277,7 +277,6 @@ model AccessRequestDocument {
 enum UserRole {
   INSPECTOR
   ADMIN
-  CONTRACTOR
   REGULATOR
 }
 
