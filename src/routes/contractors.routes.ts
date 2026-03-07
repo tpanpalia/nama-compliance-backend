@@ -39,7 +39,9 @@ const router = Router();
  *       200:
  *         description: Paginated contractor list with KPI stats
  */
-router.get('/', authorize(UserRole.ADMIN, EXTERNAL_USER_ROLES.REGULATOR), contractorsController.list);
+router.get('/', authorize(UserRole.ADMIN, UserRole.REGULATOR), contractorsController.list);
+
+router.get('/me', authorize(EXTERNAL_USER_ROLES.CONTRACTOR), contractorsController.getMe);
 
 /**
  * @swagger
@@ -62,7 +64,7 @@ router.get('/', authorize(UserRole.ADMIN, EXTERNAL_USER_ROLES.REGULATOR), contra
  */
 router.get(
   '/:id',
-  authorize(UserRole.ADMIN, EXTERNAL_USER_ROLES.REGULATOR),
+  authorize(UserRole.ADMIN, UserRole.REGULATOR),
   validate({ params: idParamSchema }),
   contractorsController.getById
 );
@@ -88,7 +90,7 @@ router.get(
  */
 router.get(
   '/:id/performance',
-  authorize(UserRole.ADMIN, EXTERNAL_USER_ROLES.REGULATOR),
+  authorize(UserRole.ADMIN, UserRole.REGULATOR),
   validate({ params: idParamSchema }),
   contractorsController.getPerformance
 );

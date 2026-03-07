@@ -1,11 +1,42 @@
 import { EvidenceSource } from '@prisma/client';
 import { NextFunction, Request, Response } from 'express';
 import { prisma } from '../config/database';
-import { confirmUpload, deleteEvidence, listEvidenceForWorkOrder, requestUpload } from '../services/evidence.service';
+import { AppError } from '../utils/AppError';
+import {
+  confirmUpload,
+  deleteEvidence,
+  listEvidence,
+  listEvidenceForWorkOrder,
+  requestUpload,
+} from '../services/evidence.service';
+
+export const listEvidenceHandler = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const source = req.query.source ? (String(req.query.source).toUpperCase() as EvidenceSource) : undefined;
+    const data = await listEvidence({
+      workOrderId: req.query.workOrderId as string | undefined,
+      checklistItemId: req.query.checklistItemId as string | undefined,
+      source,
+      actor: {
+        role: req.user?.role,
+        contractorId: req.user?.contractorId,
+        dbUserId: req.user?.dbUserId,
+      },
+    });
+
+    res.json({ data });
+  } catch (error) {
+    next(error);
+  }
+};
 
 export const getEvidenceByWorkOrder = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
-    const data = await listEvidenceForWorkOrder(req.params.workOrderId);
+    const data = await listEvidenceForWorkOrder(req.params.workOrderId, {
+      role: req.user?.role,
+      contractorId: req.user?.contractorId,
+      dbUserId: req.user?.dbUserId,
+    });
     res.json({ data, message: 'Evidence fetched successfully' });
   } catch (error) {
     next(error);
@@ -17,14 +48,21 @@ export const requestPresignedUpload = async (req: Request, res: Response, next: 
     const source = req.user?.role === 'CONTRACTOR' ? EvidenceSource.CONTRACTOR : EvidenceSource.INSPECTOR;
     const data = await requestUpload({
       workOrderId: req.params.workOrderId,
-      fileName: req.body.fileName,
-      fileType: req.body.fileType,
-      contentType: req.body.contentType,
+      checklistItemId: req.body.checklistItemId,
+      fileName: req.body.fileName || `${Date.now()}`,
+      fileType: req.body.fileType || req.body.type,
+      contentType: req.body.contentType || req.body.mimeType,
       fileSize: req.body.fileSize,
       source,
       latitude: req.body.latitude,
       longitude: req.body.longitude,
       accuracy: req.body.accuracy,
+      capturedAt: req.body.capturedAt,
+      actor: {
+        role: req.user?.role,
+        contractorId: req.user?.contractorId,
+        dbUserId: req.user?.dbUserId,
+      },
     });
 
     res.status(201).json({ data, message: 'Upload URL generated successfully' });
@@ -47,12 +85,11 @@ export const deleteEvidenceHandler = async (req: Request, res: Response, next: N
     const evidence = await prisma.evidence.findUniqueOrThrow({ where: { id: req.params.evidenceId } });
     if (req.user?.role === 'CONTRACTOR') {
       const contractor = await prisma.workOrder.findUnique({ where: { id: evidence.workOrderId }, select: { contractorId: true } });
-      if (contractor?.contractorId !== req.user.dbUserId) {
-        res.status(403).json({ error: 'Forbidden' });
-        return;
+      if (contractor?.contractorId !== req.user.contractorId) {
+        throw new AppError('Forbidden', 403, 'FORBIDDEN');
       }
     }
-    const data = await deleteEvidence(req.params.evidenceId, req.user?.dbUserId, req.user?.isExternal);
+    const data = await deleteEvidence(req.params.evidenceId, req.user?.dbUserId, req.user?.role === 'CONTRACTOR');
     res.json({ data, message: 'Evidence deleted successfully' });
   } catch (error) {
     next(error);

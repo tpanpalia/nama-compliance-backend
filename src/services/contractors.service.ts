@@ -28,7 +28,7 @@ async function computeComplianceTrend(contractorId: string): Promise<number> {
     prisma.workOrder.aggregate({
       where: {
         contractorId,
-        status: 'APPROVED',
+        status: 'INSPECTION_COMPLETED',
         overallScore: { not: null },
         approvedAt: { gte: thisMonthStart },
       },
@@ -37,7 +37,7 @@ async function computeComplianceTrend(contractorId: string): Promise<number> {
     prisma.workOrder.aggregate({
       where: {
         contractorId,
-        status: 'APPROVED',
+        status: 'INSPECTION_COMPLETED',
         overallScore: { not: null },
         approvedAt: { gte: lastMonthStart, lte: lastMonthEnd },
       },
@@ -66,7 +66,7 @@ export async function enrichContractor(contractor: {
     prisma.workOrder.aggregate({
       where: {
         contractorId: contractor.id,
-        status: 'APPROVED',
+        status: 'INSPECTION_COMPLETED',
         overallScore: { not: null },
       },
       _avg: { overallScore: true },
@@ -127,7 +127,7 @@ export async function listContractors(filters: {
     ...(search && {
       OR: [
         { companyName: { contains: search, mode: 'insensitive' } },
-        { email: { contains: search, mode: 'insensitive' } },
+        { identity: { email: { contains: search, mode: 'insensitive' } } },
         { contractorId: { contains: search, mode: 'insensitive' } },
         { address: { contains: search, mode: 'insensitive' } },
       ],
@@ -183,7 +183,7 @@ export async function listContractors(filters: {
         id: true,
         contractorId: true,
         companyName: true,
-        email: true,
+        identity: { select: { email: true } },
         phone: true,
         address: true,
         contactName: true,
@@ -214,7 +214,7 @@ export async function listContractors(filters: {
   ]);
 
   const allScores = await prisma.workOrder.aggregate({
-    where: { status: 'APPROVED', overallScore: { not: null } },
+    where: { status: 'INSPECTION_COMPLETED', overallScore: { not: null } },
     _avg: { overallScore: true },
   });
 
@@ -240,7 +240,7 @@ export async function getContractorById(id: string) {
       id: true,
       contractorId: true,
       companyName: true,
-      email: true,
+      identity: { select: { email: true } },
       phone: true,
       address: true,
       contactName: true,
@@ -259,13 +259,13 @@ export async function getContractorPerformance(id: string) {
 
   const [totalWorkOrders, completedWorkOrders, avgResult, workOrders] = await Promise.all([
     prisma.workOrder.count({ where: { contractorId: id } }),
-    prisma.workOrder.count({ where: { contractorId: id, status: 'APPROVED' } }),
+    prisma.workOrder.count({ where: { contractorId: id, status: 'INSPECTION_COMPLETED' } }),
     prisma.workOrder.aggregate({
-      where: { contractorId: id, status: 'APPROVED', overallScore: { not: null } },
+      where: { contractorId: id, status: 'INSPECTION_COMPLETED', overallScore: { not: null } },
       _avg: { overallScore: true },
     }),
     prisma.workOrder.findMany({
-      where: { contractorId: id, status: 'APPROVED' },
+      where: { contractorId: id, status: 'INSPECTION_COMPLETED' },
       include: {
         site: { select: { name: true } },
         inspector: { select: { displayName: true } },
@@ -311,7 +311,7 @@ export async function getContractorPerformance(id: string) {
     FROM "WorkOrder"
     WHERE
       "contractorId" = ${id}
-      AND status = 'APPROVED'
+      AND status = 'INSPECTION_COMPLETED'
       AND "overallScore" IS NOT NULL
       AND "approvedAt" >= NOW() - INTERVAL '6 months'
     GROUP BY DATE_TRUNC('month', "approvedAt")
@@ -368,20 +368,31 @@ export async function updateContractor(id: string, data: z.infer<typeof UpdateCo
   await getContractorById(id);
 
   if (data.email) {
-    const existing = await prisma.contractor.findFirst({
-      where: { email: data.email, id: { not: id } },
+    const existing = await prisma.identity.findFirst({
+      where: { email: data.email, contractorId: { not: id } },
     });
     if (existing) throw new AppError('Email already in use', 409);
   }
 
   return prisma.contractor.update({
     where: { id },
-    data,
+    data: {
+      companyName: data.companyName,
+      phone: data.phone,
+      address: data.address,
+      ...(data.email && {
+        identity: {
+          update: {
+            email: data.email,
+          },
+        },
+      }),
+    },
     select: {
       id: true,
       contractorId: true,
       companyName: true,
-      email: true,
+      identity: { select: { email: true } },
       phone: true,
       address: true,
       contactName: true,

@@ -1,9 +1,9 @@
 import { Request, Response, NextFunction } from 'express';
-import { UserRole } from '@prisma/client';
+import { IdentityRole, UserRole } from '@prisma/client';
 import { ExternalUserRole } from '../types/roles';
 import { sendError } from '../utils/errorResponse';
 
-type AllowedRole = UserRole | ExternalUserRole;
+type AllowedRole = UserRole | IdentityRole | ExternalUserRole;
 
 export const authorize = (...roles: AllowedRole[]) => {
   return (req: Request, res: Response, next: NextFunction): void => {

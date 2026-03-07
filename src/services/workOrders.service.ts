@@ -10,7 +10,7 @@ export function computeDisplayStatus(wo: { status: string; submittedAt: Date | n
   if (wo.status === 'PENDING') return 'Unassigned Work Orders';
   if (wo.status === 'ASSIGNED') return 'Work Yet to Begin';
   if (wo.status === 'IN_PROGRESS') return 'WIP at Site';
-  if (wo.status === 'APPROVED') return 'Inspection Completed';
+  if (wo.status === 'INSPECTION_COMPLETED') return 'Inspection Completed';
   if (wo.status === 'SUBMITTED') {
     if (wo.submittedAt) {
       const daysSince = (Date.now() - wo.submittedAt.getTime()) / (1000 * 60 * 60 * 24);
@@ -22,15 +22,30 @@ export function computeDisplayStatus(wo: { status: string; submittedAt: Date | n
 }
 
 const LIST_INCLUDE = {
-  site: { select: { name: true } },
-  contractor: { select: { companyName: true, crNumber: true } },
+  site: { select: { id: true, name: true, location: true, region: true } },
+  contractor: { select: { id: true, contractorId: true, companyName: true, crNumber: true } },
   inspector: { select: { displayName: true } },
 };
 
 const DETAIL_INCLUDE = {
   site: { select: { name: true, location: true } },
-  contractor: { select: { id: true, companyName: true, crNumber: true, email: true, phone: true } },
-  inspector: { select: { id: true, displayName: true, email: true, isActive: true } },
+  contractor: {
+    select: {
+      id: true,
+      companyName: true,
+      crNumber: true,
+      phone: true,
+      identity: { select: { email: true } },
+    },
+  },
+  inspector: {
+    select: {
+      id: true,
+      displayName: true,
+      isActive: true,
+      identity: { select: { email: true } },
+    },
+  },
   createdBy: { select: { displayName: true } },
   approvedBy: { select: { displayName: true } },
   checklist: {
@@ -59,7 +74,7 @@ export async function getWorkOrderStats() {
 
   const [total, completed, wip, overdue] = await Promise.all([
     prisma.workOrder.count(),
-    prisma.workOrder.count({ where: { status: 'APPROVED' } }),
+    prisma.workOrder.count({ where: { status: 'INSPECTION_COMPLETED' } }),
     prisma.workOrder.count({ where: { status: 'IN_PROGRESS' } }),
     prisma.workOrder.count({
       where: {
@@ -76,17 +91,25 @@ export async function listWorkOrders(filters: {
   status?: string | string[];
   year?: string | string[];
   month?: string | string[];
+  search?: string;
   searchContractor?: string;
   searchInspector?: string;
   page: number;
   limit: number;
+  role?: string;
+  contractorDbId?: string;
 }) {
-  const { status, year, month, searchContractor, searchInspector, page, limit } = filters;
+  const { status, year, month, search, searchContractor, searchInspector, page, limit, role, contractorDbId } = filters;
   const statuses = toStringArray(status).map((value) => value.toUpperCase());
   const years = toNumberArray(year);
   const months = toNumberArray(month);
 
   const where: Prisma.WorkOrderWhereInput = {};
+
+  if (role === 'CONTRACTOR') {
+    if (!contractorDbId) throw new AppError('Forbidden', 403, 'FORBIDDEN');
+    where.contractorId = contractorDbId;
+  }
 
   if (searchContractor) {
     where.contractor = {
@@ -102,6 +125,14 @@ export async function listWorkOrders(filters: {
     where.inspector = {
       displayName: { contains: searchInspector, mode: 'insensitive' },
     };
+  }
+
+  if (search) {
+    where.OR = [
+      { title: { contains: search, mode: 'insensitive' } },
+      { reference: { contains: search, mode: 'insensitive' } },
+      { site: { name: { contains: search, mode: 'insensitive' } } },
+    ];
   }
 
   if (statuses.length) {
@@ -170,12 +201,33 @@ export async function listWorkOrders(filters: {
   };
 }
 
-export async function getWorkOrderById(id: string) {
-  const wo = await prisma.workOrder.findUnique({
-    where: { id },
+export async function getWorkOrderById(
+  id: string,
+  context?: {
+    role?: string;
+    contractorDbId?: string;
+  }
+) {
+  const where: Prisma.WorkOrderWhereInput = { id };
+
+  if (context?.role === 'CONTRACTOR') {
+    if (!context.contractorDbId) throw new AppError('Forbidden', 403, 'FORBIDDEN');
+    where.contractorId = context.contractorDbId;
+  }
+
+  const wo = await prisma.workOrder.findFirst({
+    where,
     include: DETAIL_INCLUDE,
   });
   if (!wo) throw new AppError('Work order not found', 404);
+
+  const locationFlaggedCount = await prisma.evidence.count({
+    where: {
+      workOrderId: id,
+      isLocationFlagged: true,
+      isConfirmed: true,
+    },
+  });
 
   const sectionMap: Record<
     string,
@@ -229,7 +281,7 @@ export async function getWorkOrderById(id: string) {
           id: e.id,
           type: e.type,
           source: e.source,
-          fileUrl: null,
+          fileUrl: (e as any).s3Url || null,
           lat: e.latitude,
           lng: e.longitude,
           capturedAt: e.capturedAt,
@@ -249,6 +301,7 @@ export async function getWorkOrderById(id: string) {
     ...wo,
     site: wo.site ? { name: wo.site.name, address: wo.site.location } : null,
     displayStatus: computeDisplayStatus(wo),
+    locationFlaggedCount,
     sections,
   };
 }
@@ -346,17 +399,17 @@ async function logAction(workOrderId: string, action: string, details: string) {
     .catch(() => {});
 }
 
-export async function approveWorkOrder(workOrderId: string, approvedById: string) {
+export async function completeInspection(workOrderId: string, approvedById: string) {
   const wo = await prisma.workOrder.findUnique({ where: { id: workOrderId } });
   if (!wo) throw new AppError('Work order not found', 404);
   if (wo.status !== 'SUBMITTED') {
-    throw new AppError('Can only approve submitted work orders', 400);
+    throw new AppError('Can only complete submitted work orders', 400);
   }
 
   const updated = await prisma.workOrder.update({
     where: { id: workOrderId },
     data: {
-      status: 'APPROVED',
+      status: 'INSPECTION_COMPLETED',
       approvedAt: new Date(),
       approvedById,
       isLocked: true,
@@ -364,5 +417,6 @@ export async function approveWorkOrder(workOrderId: string, approvedById: string
     include: DETAIL_INCLUDE,
   });
 
+  await logAction(workOrderId, 'INSPECTION_COMPLETED', `Inspection completed. Score: ${updated.overallScore ?? 'N/A'}`);
   return { ...updated, displayStatus: computeDisplayStatus(updated) };
 }

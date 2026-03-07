@@ -4,6 +4,7 @@ import {
   confirmEvidenceUpload,
   deleteEvidenceHandler,
   getEvidenceByWorkOrder,
+  listEvidenceHandler,
   requestPresignedUpload,
 } from '../controllers/evidence.controller';
 import { authorize } from '../middleware/authorize';
@@ -13,6 +14,8 @@ import { confirmUploadSchema, requestUploadSchema } from '../schemas/evidence.sc
 import { EXTERNAL_USER_ROLES } from '../types/roles';
 
 const router = Router();
+
+router.get('/', authorize(UserRole.ADMIN, UserRole.INSPECTOR, EXTERNAL_USER_ROLES.CONTRACTOR, UserRole.REGULATOR), listEvidenceHandler);
 
 /**
  * @swagger
@@ -31,7 +34,7 @@ const router = Router();
  *       200:
  *         description: Evidence grouped by source (INSPECTOR vs CONTRACTOR)
  */
-router.get('/work-orders/:workOrderId/evidence', authorize(UserRole.ADMIN, UserRole.INSPECTOR, EXTERNAL_USER_ROLES.CONTRACTOR, EXTERNAL_USER_ROLES.REGULATOR), validate({ params: workOrderIdParamSchema }), getEvidenceByWorkOrder);
+router.get('/work-orders/:workOrderId/evidence', authorize(UserRole.ADMIN, UserRole.INSPECTOR, EXTERNAL_USER_ROLES.CONTRACTOR, UserRole.REGULATOR), validate({ params: workOrderIdParamSchema }), getEvidenceByWorkOrder);
 
 /**
  * @swagger

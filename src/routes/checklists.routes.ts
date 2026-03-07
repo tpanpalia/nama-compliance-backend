@@ -8,6 +8,7 @@ import {
   deactivateTemplate,
   deleteItem,
   deleteSection,
+  getActiveTemplate,
   getByWorkOrder,
   getTemplate,
   listTemplates,
@@ -26,6 +27,12 @@ import { EXTERNAL_USER_ROLES } from '../types/roles';
 
 const router = Router();
 
+router.get(
+  '/active-template',
+  authorize(UserRole.INSPECTOR, EXTERNAL_USER_ROLES.CONTRACTOR, UserRole.ADMIN, UserRole.REGULATOR),
+  getActiveTemplate
+);
+
 /**
  * @swagger
  * /api/v1/checklists/work-orders/{workOrderId}:
@@ -43,7 +50,7 @@ const router = Router();
  *       200:
  *         description: Checklist with sections, items, and current responses
  */
-router.get('/work-orders/:workOrderId', authorize(UserRole.INSPECTOR, EXTERNAL_USER_ROLES.CONTRACTOR, UserRole.ADMIN, EXTERNAL_USER_ROLES.REGULATOR), validate({ params: workOrderIdParamSchema }), getByWorkOrder);
+router.get('/work-orders/:workOrderId', authorize(UserRole.INSPECTOR, EXTERNAL_USER_ROLES.CONTRACTOR, UserRole.ADMIN, UserRole.REGULATOR), validate({ params: workOrderIdParamSchema }), getByWorkOrder);
 
 /**
  * @swagger
@@ -115,7 +122,7 @@ router.post('/work-orders/:workOrderId/submit', authorize(UserRole.INSPECTOR), v
  *         description: List of templates
  */
 router.get('/templates', authorize(UserRole.ADMIN), listTemplates);
-router.get('/templates/:id', authorize(UserRole.ADMIN, EXTERNAL_USER_ROLES.REGULATOR), validate({ params: idParamSchema }), getTemplate);
+router.get('/templates/:id', authorize(UserRole.ADMIN, UserRole.REGULATOR), validate({ params: idParamSchema }), getTemplate);
 
 /**
  * @swagger

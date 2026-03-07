@@ -12,6 +12,7 @@
     "db:push": "prisma db push",
     "db:seed": "ts-node prisma/seed.ts",
     "db:studio": "prisma studio",
+    "db:studio:local": "node scripts/prisma-studio-local.js",
     "minio:up": "docker compose -f docker-compose.minio.yml up -d",
     "minio:down": "docker compose -f docker-compose.minio.yml down",
     "minio:logs": "docker compose -f docker-compose.minio.yml logs -f",

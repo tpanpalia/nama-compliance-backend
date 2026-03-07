@@ -2,8 +2,13 @@ node_modules/
 dist/
 .env
 .env.local
+.env.supabase
 .tmp-*.err
+codex-dev.out
+codex-dev.err
 *.log
 coverage/
 .DS_Store
 prisma/migrations/
+prisma/supabase-data-sync.sql
+prisma/supabase-data-sync-exec.sql

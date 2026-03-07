@@ -31,7 +31,7 @@ const router = Router();
 router.get(
   '/dashboard',
   authenticate,
-  authorize(UserRole.ADMIN, UserRole.INSPECTOR, EXTERNAL_USER_ROLES.CONTRACTOR, EXTERNAL_USER_ROLES.REGULATOR),
+  authorize(UserRole.ADMIN, UserRole.INSPECTOR, EXTERNAL_USER_ROLES.CONTRACTOR, UserRole.REGULATOR),
   dashboard
 );
 

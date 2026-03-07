@@ -27,7 +27,6 @@ export const CreateSectionSchema = z.object({
   name: z.string().min(2),
   description: z.string().optional(),
   weight: z.number().min(0).max(1),
-  defaultWeight: z.number().min(0).max(1).optional(),
   order: z.number().int(),
 });
 
@@ -35,21 +34,20 @@ export const UpdateSectionSchema = z.object({
   name: z.string().min(2).optional(),
   description: z.string().optional(),
   weight: z.number().min(0).max(1).optional(),
-  defaultWeight: z.number().min(0).max(1).optional(),
   order: z.number().int().optional(),
 });
 
 export const CreateItemSchema = z.object({
   text: z.string().min(5, 'Item text must be at least 5 characters'),
   isRequired: z.boolean().default(true),
-  weight: z.number().int().min(1).max(100).default(10),
+  weight: z.number().int().min(0).default(10),
   order: z.number().int().min(0).optional(),
 });
 
 export const UpdateItemSchema = z.object({
   text: z.string().min(5).optional(),
   isRequired: z.boolean().optional(),
-  weight: z.number().int().min(1).max(100).optional(),
+  weight: z.number().int().min(0).optional(),
   order: z.number().int().min(0).optional(),
 });
 
@@ -83,6 +81,10 @@ async function getActiveTemplate() {
   });
   if (!template) throw new AppError('No active checklist template found', 404);
   return template;
+}
+
+export async function getActiveTemplateForApi() {
+  return getActiveTemplate();
 }
 
 export async function getChecklistForWorkOrder(workOrderId: string) {
@@ -173,17 +175,39 @@ export async function submitChecklist(workOrderId: string) {
     throw new AppError(`Cannot submit — ${missingItems.length} required item(s) are incomplete`, 400);
   }
 
-  const updated = await prisma.workOrderChecklist.update({
-    where: { workOrderId },
-    data: { isSubmitted: true, submittedAt: new Date() },
-  });
+  const submittedAt = new Date();
+  const [updatedChecklist] = await prisma.$transaction([
+    prisma.workOrderChecklist.update({
+      where: { workOrderId },
+      data: { isSubmitted: true, submittedAt },
+    }),
+    prisma.workOrder.update({
+      where: { id: workOrderId },
+      data: {
+        status: 'INSPECTION_COMPLETED',
+        submittedAt,
+        approvedAt: submittedAt,
+        isLocked: true,
+      },
+    }),
+  ]);
 
-  return { checklistId: updated.id, submittedAt: updated.submittedAt };
+  return { checklistId: updatedChecklist.id, submittedAt: updatedChecklist.submittedAt };
 }
 
 export async function listTemplates() {
   return prisma.checklistTemplate.findMany({
-    include: { _count: { select: { sections: true } } },
+    include: {
+      sections: {
+        orderBy: { order: 'asc' },
+        include: {
+          items: {
+            orderBy: { order: 'asc' },
+          },
+        },
+      },
+      _count: { select: { sections: true } },
+    },
     orderBy: { createdAt: 'desc' },
   });
 }
@@ -222,7 +246,7 @@ export async function deactivateTemplate(id: string) {
 export async function addSection(templateId: string, data: z.infer<typeof CreateSectionSchema>) {
   await getTemplateById(templateId);
   return prisma.checklistSection.create({
-    data: { ...data, defaultWeight: data.defaultWeight ?? data.weight, templateId },
+    data: { ...data, templateId },
   });
 }
 
@@ -231,7 +255,22 @@ export async function updateSection(sectionId: string, data: z.infer<typeof Upda
 }
 
 export async function deleteSection(sectionId: string) {
-  return prisma.checklistSection.delete({ where: { id: sectionId } });
+  const section = await prisma.checklistSection.findUnique({
+    where: { id: sectionId },
+    include: { _count: { select: { items: true } } },
+  });
+  if (!section) throw new AppError('Section not found', 404);
+
+  const responsesExist = await prisma.checklistResponse.findFirst({
+    where: { item: { sectionId } },
+    select: { id: true },
+  });
+  if (responsesExist) {
+    throw new AppError('Cannot delete section — it has been used in inspections', 400);
+  }
+
+  await prisma.checklistSection.delete({ where: { id: sectionId } });
+  return { message: 'Section deleted' };
 }
 
 export async function addItem(sectionId: string, data: z.infer<typeof CreateItemSchema>) {
@@ -267,8 +306,16 @@ export async function deleteItem(itemId: string) {
   });
   if (!item) throw new AppError('Item not found', 404);
 
+  const responsesExist = await prisma.checklistResponse.findFirst({
+    where: { itemId },
+    select: { id: true },
+  });
+  if (responsesExist) {
+    throw new AppError('Cannot delete item — it has been used in inspections', 400);
+  }
+
   await prisma.checklistItem.delete({ where: { id: itemId } });
-  return { deleted: true, id: itemId };
+  return { message: 'Item deleted' };
 }
 
 export async function reorderItems(items: z.infer<typeof ReorderItemsSchema>['items']) {
@@ -315,28 +362,6 @@ export async function updateSectionWeights(
   });
 }
 
-export async function resetSectionWeightsToDefault(templateId: string) {
-  const sections = await prisma.checklistSection.findMany({
-    where: { templateId },
-    select: { id: true, defaultWeight: true },
-  });
-
-  await prisma.$transaction(
-    sections.map((s) =>
-      prisma.checklistSection.update({
-        where: { id: s.id },
-        data: { weight: s.defaultWeight },
-      })
-    )
-  );
-
-  return prisma.checklistTemplate.findUnique({
-    where: { id: templateId },
-    include: {
-      sections: {
-        orderBy: { order: 'asc' },
-        include: { items: { orderBy: { order: 'asc' } } },
-      },
-    },
-  });
+export async function resetSectionWeightsToDefault(_templateId: string) {
+  throw new AppError('Reset to default weights is not supported in the current schema', 400);
 }

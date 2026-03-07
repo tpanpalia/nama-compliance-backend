@@ -4,7 +4,8 @@ import * as StatsService from '../services/stats.service';
 export const dashboard = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const role = req.user!.role as string;
-    const userId = req.user!.dbUserId!;
+    const userId = req.user!.dbUserId;
+    const contractorId = req.user!.contractorId;
 
     let data;
     switch (role) {
@@ -15,10 +16,15 @@ export const dashboard = async (req: Request, res: Response, next: NextFunction)
         break;
       }
       case 'INSPECTOR':
-        data = await StatsService.getInspectorDashboard(userId);
+        data = await StatsService.getInspectorDashboard(userId!);
         break;
       case 'CONTRACTOR':
-        data = await StatsService.getContractorDashboard(userId);
+        if (!contractorId) {
+          return res.status(403).json({
+            error: 'Contractor profile not found',
+          });
+        }
+        data = await StatsService.getContractorDashboard(contractorId!);
         break;
       case 'REGULATOR':
         data = await StatsService.getRegulatorDashboard();

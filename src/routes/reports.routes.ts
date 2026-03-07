@@ -30,7 +30,7 @@ const router = Router();
 router.get(
   '/work-order/:workOrderId',
   authenticate,
-  authorize(UserRole.ADMIN, UserRole.INSPECTOR, EXTERNAL_USER_ROLES.REGULATOR),
+  authorize(UserRole.ADMIN, UserRole.INSPECTOR, UserRole.REGULATOR),
   ReportsController.getWorkOrderReport
 );
 
@@ -59,7 +59,7 @@ router.get(
 router.get(
   '/contractor/:contractorId',
   authenticate,
-  authorize(UserRole.ADMIN, EXTERNAL_USER_ROLES.REGULATOR),
+  authorize(UserRole.ADMIN, UserRole.REGULATOR),
   ReportsController.getContractorReport
 );
 
@@ -84,7 +84,7 @@ router.get(
 router.get(
   '/system-summary',
   authenticate,
-  authorize(UserRole.ADMIN, EXTERNAL_USER_ROLES.REGULATOR),
+  authorize(UserRole.ADMIN, UserRole.REGULATOR),
   ReportsController.getSystemSummaryReport
 );
 

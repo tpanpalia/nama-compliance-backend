@@ -41,12 +41,12 @@ export async function getWorkOrderReportData(workOrderId: string) {
           crNumber: true,
           contractorId: true,
           phone: true,
-          email: true,
           address: true,
+          identity: { select: { email: true } },
         },
       },
       inspector: {
-        select: { displayName: true, email: true },
+        select: { displayName: true, identity: { select: { email: true } } },
       },
       createdBy: { select: { displayName: true } },
       approvedBy: { select: { displayName: true } },
@@ -87,8 +87,8 @@ export async function getWorkOrderReportData(workOrderId: string) {
   });
 
   if (!wo) throw new AppError('Work order not found', 404);
-  if (wo.status !== 'APPROVED') {
-    throw new AppError('Only approved work orders can generate inspection reports', 400);
+  if (wo.status !== 'INSPECTION_COMPLETED') {
+    throw new AppError('Only completed inspections can generate inspection reports', 400);
   }
 
   const sectionMap: Record<
@@ -186,14 +186,14 @@ export async function getWorkOrderReportData(workOrderId: string) {
           crNumber: wo.contractor.crNumber,
           contractorId: wo.contractor.contractorId,
           phone: wo.contractor.phone,
-          email: wo.contractor.email,
+          email: wo.contractor.identity?.email || null,
           address: wo.contractor.address,
         }
       : null,
     inspector: wo.inspector
       ? {
           displayName: wo.inspector.displayName,
-          email: wo.inspector.email,
+          email: wo.inspector.identity?.email || null,
         }
       : null,
     approvedBy: wo.approvedBy?.displayName || null,
@@ -210,6 +210,7 @@ export async function getWorkOrderReportData(workOrderId: string) {
 export async function getContractorReportData(contractorId: string, startDate?: string, endDate?: string) {
   const contractor = await prisma.contractor.findUnique({
     where: { id: contractorId },
+    include: { identity: { select: { email: true } } },
   });
   if (!contractor) throw new AppError('Contractor not found', 404);
 
@@ -220,7 +221,7 @@ export async function getContractorReportData(contractorId: string, startDate?: 
   const workOrders = await prisma.workOrder.findMany({
     where: {
       contractorId,
-      status: 'APPROVED',
+      status: 'INSPECTION_COMPLETED',
       overallScore: { not: null },
       ...(Object.keys(dateFilter).length > 0 && { approvedAt: dateFilter }),
     },
@@ -320,7 +321,7 @@ export async function getContractorReportData(contractorId: string, startDate?: 
       companyName: contractor.companyName,
       crNumber: contractor.crNumber,
       contractorId: contractor.contractorId,
-      email: contractor.email,
+      email: contractor.identity?.email || null,
       phone: contractor.phone,
       address: contractor.address,
       registeredAt: contractor.createdAt.toISOString(),
@@ -364,7 +365,7 @@ export async function getSystemSummaryReportData(year?: number, month?: number) 
     prisma.contractor.count({ where: { isActive: true } }),
     prisma.workOrder.aggregate({
       where: {
-        status: 'APPROVED',
+        status: 'INSPECTION_COMPLETED',
         overallScore: { not: null },
         approvedAt: dateFilter,
       },
@@ -386,7 +387,7 @@ export async function getSystemSummaryReportData(year?: number, month?: number) 
       ROUND(AVG("overallScore")::numeric, 1)::float        as "avgScore"
     FROM "WorkOrder"
     WHERE
-      status = 'APPROVED'
+      status = 'INSPECTION_COMPLETED'
       AND "approvedAt" >= ${dateFilter.gte}
       AND "approvedAt" <= ${dateFilter.lte}
     GROUP BY DATE_TRUNC('month', "approvedAt")
@@ -413,7 +414,7 @@ export async function getSystemSummaryReportData(year?: number, month?: number) 
     FROM "Contractor" c
     JOIN "WorkOrder" wo ON wo."contractorId" = c.id
     WHERE
-      wo.status = 'APPROVED'
+      wo.status = 'INSPECTION_COMPLETED'
       AND wo."overallScore" IS NOT NULL
       AND wo."approvedAt" >= ${dateFilter.gte}
       AND wo."approvedAt" <= ${dateFilter.lte}
@@ -439,7 +440,7 @@ export async function getSystemSummaryReportData(year?: number, month?: number) 
     JOIN "WorkOrder"          wo  ON woc."workOrderId" = wo.id
     WHERE
       cr.rating IS NOT NULL
-      AND wo.status = 'APPROVED'
+      AND wo.status = 'INSPECTION_COMPLETED'
       AND wo."approvedAt" >= ${dateFilter.gte}
       AND wo."approvedAt" <= ${dateFilter.lte}
     GROUP BY cs.name, cs.order
@@ -449,7 +450,7 @@ export async function getSystemSummaryReportData(year?: number, month?: number) 
   const bandDistribution = await prisma.workOrder.groupBy({
     by: ['complianceBand'],
     where: {
-      status: 'APPROVED',
+      status: 'INSPECTION_COMPLETED',
       complianceBand: { not: null },
       approvedAt: dateFilter,
     },

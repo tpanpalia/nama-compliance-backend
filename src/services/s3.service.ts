@@ -18,6 +18,15 @@ export const buildEvidenceKey = (workOrderId: string, contentType: string): stri
   return `evidence/${workOrderId}/${uuidv4()}.${ext}`;
 };
 
+export const buildChecklistEvidenceKey = (
+  workOrderId: string,
+  checklistItemId: string,
+  contentType: string
+): string => {
+  const ext = extFromContentType(contentType);
+  return `evidence/${workOrderId}/${checklistItemId}/${uuidv4()}.${ext}`;
+};
+
 export const generateUploadPresignedUrl = async (
   key: string,
   contentType: string,
@@ -77,4 +86,27 @@ export const getObjectMetadata = async (key: string): Promise<{
     contentType: output.ContentType || 'application/octet-stream',
     lastModified: output.LastModified ? output.LastModified.toISOString() : null,
   };
+};
+
+export const generateObjectUrl = (key: string): string => {
+  const endpoint = process.env.S3_PUBLIC_BASE_URL || process.env.S3_ENDPOINT;
+
+  if (endpoint) {
+    const normalized = endpoint.replace(/\/$/, '');
+    const forcePathStyle = (process.env.S3_FORCE_PATH_STYLE || 'false').toLowerCase() === 'true';
+
+    if (forcePathStyle) {
+      return `${normalized}/${S3_BUCKET}/${key}`;
+    }
+
+    try {
+      const url = new URL(normalized);
+      return `${url.protocol}//${S3_BUCKET}.${url.host}/${key}`;
+    } catch {
+      return `${normalized}/${key}`;
+    }
+  }
+
+  const region = process.env.AWS_REGION || 'me-south-1';
+  return `https://${S3_BUCKET}.s3.${region}.amazonaws.com/${key}`;
 };

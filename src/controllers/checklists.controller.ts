@@ -51,6 +51,14 @@ export const listTemplates = async (_req: Request, res: Response, next: NextFunc
   }
 };
 
+export const getActiveTemplate = async (_req: Request, res: Response, next: NextFunction) => {
+  try {
+    res.json({ data: await ChecklistsService.getActiveTemplateForApi() });
+  } catch (err) {
+    next(err);
+  }
+};
+
 export const getTemplate = async (req: Request, res: Response, next: NextFunction) => {
   try {
     res.json({ data: await ChecklistsService.getTemplateById(req.params.id) });
@@ -117,8 +125,8 @@ export const updateSection = async (req: Request, res: Response, next: NextFunct
 
 export const deleteSection = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    await ChecklistsService.deleteSection(req.params.sectionId);
-    res.json({ data: { deleted: true } });
+    const result = await ChecklistsService.deleteSection(req.params.sectionId);
+    res.json(result);
   } catch (err) {
     next(err);
   }
@@ -150,8 +158,8 @@ export const updateItem = async (req: Request, res: Response, next: NextFunction
 
 export const deleteItem = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    await ChecklistsService.deleteItem(req.params.itemId);
-    res.json({ data: { deleted: true } });
+    const result = await ChecklistsService.deleteItem(req.params.itemId);
+    res.json(result);
   } catch (err) {
     next(err);
   }

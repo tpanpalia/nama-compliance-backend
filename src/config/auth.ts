@@ -15,11 +15,12 @@ export const COOKIE_OPTIONS: CookieOptions = {
 };
 
 export interface JWTPayload {
-  userId: string;
+  identityId: string;
   email: string;
   role: string;
-  isExternal: boolean;
-  dbUserId: string;
+  displayName: string;
+  dbUserId?: string;
+  contractorId?: string;
 }
 
 export const signToken = (payload: JWTPayload): string => {

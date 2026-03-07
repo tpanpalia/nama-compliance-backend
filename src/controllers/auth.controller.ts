@@ -2,6 +2,7 @@ import { NextFunction, Request, Response } from 'express';
 import bcrypt from 'bcryptjs';
 import { prisma } from '../config/database';
 import { COOKIE_NAME, COOKIE_OPTIONS, JWTPayload, signToken } from '../config/auth';
+import { AppError } from '../utils/AppError';
 
 const BCRYPT_ROUNDS = 10;
 const DUMMY_HASH = bcrypt.hashSync('dummy_password_for_timing', BCRYPT_ROUNDS);
@@ -33,96 +34,42 @@ export const login = async (req: Request, res: Response, next: NextFunction) => 
       });
     }
 
-    let dbUserId: string | null = null;
-    let dbPassword: string | null = null;
-    let role: string | null = null;
-    let isActive = false;
-    let displayName: string | null = null;
-
-    const internalUser = await prisma.user.findUnique({
+    const identity = await prisma.identity.findUnique({
       where: { email: emailNormalized },
-      select: {
-        id: true,
-        email: true,
-        password: true,
-        role: true,
-        isActive: true,
-        displayName: true,
+      include: {
+        user: true,
+        contractor: true,
       },
     });
 
-    if (internalUser) {
-      dbUserId = internalUser.id;
-      dbPassword = internalUser.password;
-      role = internalUser.role;
-      isActive = internalUser.isActive;
-      displayName = internalUser.displayName;
-    }
-
-    if (!dbUserId) {
-      const contractor = await prisma.contractor.findUnique({
-        where: { email: emailNormalized },
-        select: {
-          id: true,
-          email: true,
-          password: true,
-          isActive: true,
-          companyName: true,
-        },
-      });
-      if (contractor) {
-        dbUserId = contractor.id;
-        dbPassword = contractor.password;
-        role = 'CONTRACTOR';
-        isActive = contractor.isActive;
-        displayName = contractor.companyName;
-      }
-    }
-
-    if (!dbUserId) {
-      const regulator = await prisma.regulator.findUnique({
-        where: { email: emailNormalized },
-        select: {
-          id: true,
-          email: true,
-          password: true,
-          isActive: true,
-          displayName: true,
-        },
-      });
-      if (regulator) {
-        dbUserId = regulator.id;
-        dbPassword = regulator.password;
-        role = 'REGULATOR';
-        isActive = regulator.isActive;
-        displayName = regulator.displayName;
-      }
-    }
-
-    const hashToCompare = dbPassword || DUMMY_HASH;
+    const hashToCompare = identity?.password || DUMMY_HASH;
     const passwordMatch = await bcrypt.compare(password, hashToCompare);
 
-    if (!dbUserId || !passwordMatch) {
+    if (!identity || !passwordMatch) {
       return res.status(401).json({
         error: 'Invalid email or password',
         code: 'INVALID_CREDENTIALS',
       });
     }
 
-    if (!isActive) {
+    const profile = identity.user || identity.contractor;
+    const profileIsActive = profile?.isActive ?? false;
+
+    if (!identity.isActive || !profileIsActive) {
       return res.status(403).json({
         error: 'Account is deactivated. Contact your administrator.',
         code: 'ACCOUNT_INACTIVE',
       });
     }
 
-    const isExternal = role === 'CONTRACTOR' || role === 'REGULATOR';
+    const displayName = identity.user?.displayName || identity.contractor?.companyName || identity.email;
     const jwtPayload: JWTPayload = {
-      userId: dbUserId,
+      identityId: identity.id,
       email: emailNormalized,
-      role: role!,
-      isExternal,
-      dbUserId,
+      role: identity.role,
+      displayName,
+      dbUserId: identity.userId || undefined,
+      contractorId: identity.contractorId || undefined,
     };
 
     const token = signToken(jwtPayload);
@@ -131,11 +78,11 @@ export const login = async (req: Request, res: Response, next: NextFunction) => 
     return res.json({
       data: {
         user: {
-          id: dbUserId,
+          id: identity.contractorId || identity.userId || identity.id,
           email: emailNormalized,
-          role,
+          role: identity.role,
           displayName,
-          isExternal,
+          isExternal: identity.role === 'CONTRACTOR',
         },
         token,
       },
@@ -148,64 +95,52 @@ export const login = async (req: Request, res: Response, next: NextFunction) => 
 
 export const getMe = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { userId, role } = req.user!;
+    const identityId = req.user?.identityId;
+    if (!identityId) throw new AppError('Authentication required', 401, 'NO_TOKEN');
 
-    if (role === 'ADMIN' || role === 'INSPECTOR' || role === 'REGULATOR') {
-      const user = await prisma.user.findUnique({
-        where: { id: userId! },
-        select: {
-          id: true,
-          email: true,
-          role: true,
-          displayName: true,
-          isActive: true,
-        },
-      });
-      if (user) return res.json({ data: { ...user, isExternal: false } });
+    const identity = await prisma.identity.findUnique({
+      where: { id: identityId },
+      include: {
+        user: true,
+        contractor: true,
+      },
+    });
+
+    if (!identity) {
+      throw new AppError('Identity not found', 404, 'NOT_FOUND');
     }
 
-    if (role === 'CONTRACTOR') {
-      const contractor = await prisma.contractor.findUnique({
-        where: { id: userId! },
-        select: {
-          id: true,
-          email: true,
-          companyName: true,
-          contractorId: true,
-          isActive: true,
-        },
-      });
+    if (identity.contractor) {
       return res.json({
         data: {
-          ...contractor,
-          role: 'CONTRACTOR',
+          id: identity.contractor.id,
+          email: identity.email,
+          companyName: identity.contractor.companyName,
+          contractorId: identity.contractor.contractorId,
+          isActive: identity.contractor.isActive && identity.isActive,
+          role: identity.role,
           isExternal: true,
-          displayName: contractor?.companyName,
+          displayName: identity.contractor.companyName,
         },
       });
     }
 
-    if (role === 'REGULATOR') {
-      const regulator = await prisma.regulator.findUnique({
-        where: { id: userId! },
-        select: {
-          id: true,
-          email: true,
-          displayName: true,
-          organisation: true,
-          isActive: true,
-        },
-      });
+    if (identity.user) {
       return res.json({
         data: {
-          ...regulator,
-          role: 'REGULATOR',
-          isExternal: true,
+          id: identity.user.id,
+          email: identity.email,
+          role: identity.user.role,
+          displayName: identity.user.displayName,
+          organisation: identity.user.organisation,
+          department: identity.user.department,
+          isActive: identity.user.isActive && identity.isActive,
+          isExternal: false,
         },
       });
     }
 
-    return res.status(400).json({ error: 'Unknown role' });
+    throw new AppError('Identity profile is missing', 400, 'INVALID_IDENTITY');
   } catch (err) {
     return next(err);
   }

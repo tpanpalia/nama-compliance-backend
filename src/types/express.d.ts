@@ -1,5 +1,4 @@
-import { UserRole } from '@prisma/client';
-import { ExternalUserRole } from './roles';
+import { IdentityRole } from '@prisma/client';
 
 declare global {
   namespace Express {
@@ -10,12 +9,12 @@ declare global {
     interface Request {
       user?: {
         oid?: string;
-        userId?: string;
+        identityId?: string;
         email: string;
         displayName?: string;
-        role: UserRole | ExternalUserRole;
-        isExternal: boolean;
-        dbUserId: string;
+        role: IdentityRole;
+        dbUserId?: string;
+        contractorId?: string;
       };
     }
   }

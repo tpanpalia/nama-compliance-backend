@@ -12,10 +12,13 @@ export const list = async (req: Request, res: Response, next: NextFunction) => {
       status: req.query.status as string | string[] | undefined,
       year: req.query.year as string | string[] | undefined,
       month: req.query.month as string | string[] | undefined,
+      search: req.query.search as string,
       searchContractor: req.query.searchContractor as string,
       searchInspector: req.query.searchInspector as string,
       page: parseInt(req.query.page as string, 10) || 1,
       limit: parseInt(req.query.limit as string, 10) || 50,
+      role: req.user!.role,
+      contractorDbId: req.user!.contractorId,
     });
     res.json(result);
   } catch (err) {
@@ -25,7 +28,10 @@ export const list = async (req: Request, res: Response, next: NextFunction) => {
 
 export const getById = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const data = await WorkOrdersService.getWorkOrderById(req.params.id);
+    const data = await WorkOrdersService.getWorkOrderById(req.params.id, {
+      role: req.user!.role,
+      contractorDbId: req.user!.contractorId,
+    });
     res.json({ data });
   } catch (err) {
     next(err);
@@ -71,15 +77,6 @@ export const assignInspector = async (req: Request, res: Response, next: NextFun
     return res.json({ data });
   } catch (err) {
     return next(err);
-  }
-};
-
-export const approve = async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const data = await WorkOrdersService.approveWorkOrder(req.params.id, req.user!.dbUserId!);
-    res.json({ data });
-  } catch (err) {
-    next(err);
   }
 };
 

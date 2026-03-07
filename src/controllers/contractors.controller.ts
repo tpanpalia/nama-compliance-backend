@@ -24,6 +24,15 @@ export const list = async (req: Request, res: Response, next: NextFunction) => {
   }
 };
 
+export const getMe = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const contractor = await ContractorsService.getContractorById(req.user!.contractorId!);
+    res.json({ data: contractor });
+  } catch (err) {
+    next(err);
+  }
+};
+
 export const getById = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const contractor = await ContractorsService.getContractorById(req.params.id);

@@ -1,4 +1,5 @@
 import bcrypt from 'bcryptjs';
+import { AccessRequestType, IdentityRole, UserRole } from '@prisma/client';
 import { z } from 'zod';
 import { prisma } from '../config/database';
 import { AppError } from '../utils/AppError';
@@ -41,8 +42,16 @@ const FULL_INCLUDE = {
   contractor: {
     select: { id: true, contractorId: true, isActive: true },
   },
-  regulator: {
-    select: { id: true, isActive: true },
+  user: {
+    select: {
+      id: true,
+      role: true,
+      displayName: true,
+      organisation: true,
+      department: true,
+      isActive: true,
+      identity: { select: { email: true, isActive: true } },
+    },
   },
 };
 
@@ -139,7 +148,7 @@ export async function createAccessRequest(data: z.infer<typeof CreateAccessReque
   return prisma.accessRequest.create({
     data: {
       requestId,
-      role: data.role,
+      role: data.role as AccessRequestType,
       contactName: data.contactName,
       email: data.email,
       phone: data.phone,
@@ -162,20 +171,27 @@ export async function approveAccessRequest(id: string, password: string) {
 
   const hashedPassword = await bcrypt.hash(password, 10);
 
-  if (request.role === 'CONTRACTOR') {
+  if (request.role === AccessRequestType.CONTRACTOR) {
     const count = await prisma.contractor.count();
-    const contractorId = `C-${String(count + 1).padStart(5, '0')}`;
+    const contractorCode = `C-${String(count + 1).padStart(5, '0')}`;
 
     const contractor = await prisma.contractor.create({
       data: {
-        contractorId,
+        contractorId: contractorCode,
         companyName: request.companyName!,
         tradeLicense: request.tradeLicense!,
         crNumber: request.crNumber!,
         contactName: request.contactName,
-        email: request.email,
-        password: hashedPassword,
         phone: request.phone,
+        isActive: true,
+        identity: {
+          create: {
+            email: request.email,
+            password: hashedPassword,
+            role: IdentityRole.CONTRACTOR,
+            isActive: true,
+          },
+        },
       },
     });
 
@@ -189,17 +205,25 @@ export async function approveAccessRequest(id: string, password: string) {
       include: FULL_INCLUDE,
     });
 
-    return { request: updated, account: { role: 'CONTRACTOR', id: contractor.id, contractorId } };
+    return { request: updated, account: { role: 'CONTRACTOR', id: contractor.id, contractorId: contractorCode } };
   }
 
-  if (request.role === 'REGULATOR') {
-    const regulator = await prisma.regulator.create({
+  if (request.role === AccessRequestType.REGULATOR) {
+    const user = await prisma.user.create({
       data: {
         displayName: request.contactName,
-        email: request.email,
-        password: hashedPassword,
+        role: UserRole.REGULATOR,
         organisation: request.organisation!,
         department: request.department,
+        isActive: true,
+        identity: {
+          create: {
+            email: request.email,
+            password: hashedPassword,
+            role: IdentityRole.REGULATOR,
+            isActive: true,
+          },
+        },
       },
     });
 
@@ -208,12 +232,12 @@ export async function approveAccessRequest(id: string, password: string) {
       data: {
         status: 'APPROVED',
         reviewedAt: new Date(),
-        regulatorId: regulator.id,
+        userId: user.id,
       },
       include: FULL_INCLUDE,
     });
 
-    return { request: updated, account: { role: 'REGULATOR', id: regulator.id } };
+    return { request: updated, account: { role: 'REGULATOR', id: user.id } };
   }
 
   throw new AppError('Unsupported access request role', 400);
@@ -259,15 +283,15 @@ export async function deactivateUser(requestId: string) {
     throw new AppError('Can only deactivate approved users', 400);
   }
 
-  if (request.role === 'CONTRACTOR' && request.contractorId) {
+  if (request.role === AccessRequestType.CONTRACTOR && request.contractorId) {
     await prisma.contractor.update({
       where: { id: request.contractorId },
-      data: { isActive: false },
+      data: { isActive: false, identity: { update: { isActive: false } } },
     });
-  } else if (request.role === 'REGULATOR' && request.regulatorId) {
-    await prisma.regulator.update({
-      where: { id: request.regulatorId },
-      data: { isActive: false },
+  } else if (request.role === AccessRequestType.REGULATOR && request.userId) {
+    await prisma.user.update({
+      where: { id: request.userId },
+      data: { isActive: false, identity: { update: { isActive: false } } },
     });
   }
 

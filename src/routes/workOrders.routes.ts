@@ -42,7 +42,11 @@ const router = Router();
  *       200:
  *         description: Paginated work orders and dashboard stats
  */
-router.get('/', authorize(UserRole.ADMIN, UserRole.INSPECTOR, EXTERNAL_USER_ROLES.REGULATOR), workOrdersController.list);
+router.get(
+  '/',
+  authorize(UserRole.ADMIN, UserRole.INSPECTOR, UserRole.REGULATOR, EXTERNAL_USER_ROLES.CONTRACTOR),
+  workOrdersController.list
+);
 
 /**
  * @swagger
@@ -105,7 +109,7 @@ router.get('/stats', authorize(UserRole.ADMIN, UserRole.INSPECTOR), workOrdersCo
  */
 router.get(
   '/:id',
-  authorize(UserRole.ADMIN, UserRole.INSPECTOR, EXTERNAL_USER_ROLES.REGULATOR),
+  authorize(UserRole.ADMIN, UserRole.INSPECTOR, UserRole.REGULATOR, EXTERNAL_USER_ROLES.CONTRACTOR),
   validate({ params: idParamSchema }),
   workOrdersController.getById
 );
@@ -175,24 +179,5 @@ router.patch(
   validate({ params: idParamSchema }),
   workOrdersController.assignInspector
 );
-
-/**
- * @swagger
- * /api/v1/work-orders/{id}/approve:
- *   patch:
- *     summary: Approve submitted work order (ADMIN only)
- *     tags: [Work Orders]
- *     security:
- *       - BearerAuth: []
- *     parameters:
- *       - in: path
- *         name: id
- *         required: true
- *         schema: { type: string }
- *     responses:
- *       200:
- *         description: Work order approved
- */
-router.patch('/:id/approve', authorize(UserRole.ADMIN), validate({ params: idParamSchema }), workOrdersController.approve);
 
 export default router;

@@ -46,10 +46,10 @@ export async function getAdminDashboard(filters: DashboardFilters) {
 
   const [currentInspections, previousInspections] = await Promise.all([
     prisma.workOrder.count({
-      where: { status: { in: ['SUBMITTED', 'APPROVED'] }, createdAt: current },
+      where: { status: { in: ['SUBMITTED', 'INSPECTION_COMPLETED'] }, createdAt: current },
     }),
     prisma.workOrder.count({
-      where: { status: { in: ['SUBMITTED', 'APPROVED'] }, createdAt: previous },
+      where: { status: { in: ['SUBMITTED', 'INSPECTION_COMPLETED'] }, createdAt: previous },
     }),
   ]);
   const inspectionTrend = computeTrend(currentInspections, previousInspections);
@@ -66,7 +66,7 @@ export async function getAdminDashboard(filters: DashboardFilters) {
         isActive: true,
         workOrders: {
           some: {
-            status: { in: ['ASSIGNED', 'IN_PROGRESS', 'SUBMITTED', 'APPROVED'] },
+            status: { in: ['ASSIGNED', 'IN_PROGRESS', 'SUBMITTED', 'INSPECTION_COMPLETED'] },
             createdAt: previous,
           },
         },
@@ -78,7 +78,7 @@ export async function getAdminDashboard(filters: DashboardFilters) {
   const [currentAvg, previousAvg] = await Promise.all([
     prisma.workOrder.aggregate({
       where: {
-        status: 'APPROVED',
+        status: 'INSPECTION_COMPLETED',
         overallScore: { not: null },
         approvedAt: current,
       },
@@ -86,7 +86,7 @@ export async function getAdminDashboard(filters: DashboardFilters) {
     }),
     prisma.workOrder.aggregate({
       where: {
-        status: 'APPROVED',
+        status: 'INSPECTION_COMPLETED',
         overallScore: { not: null },
         approvedAt: previous,
       },
@@ -116,7 +116,7 @@ export async function getAdminDashboard(filters: DashboardFilters) {
     FROM "WorkOrder"
     WHERE
       "createdAt" >= NOW() - INTERVAL '6 months'
-      AND status IN ('SUBMITTED', 'APPROVED')
+      AND status IN ('SUBMITTED', 'INSPECTION_COMPLETED')
     GROUP BY DATE_TRUNC('month', "createdAt")
     ORDER BY DATE_TRUNC('month', "createdAt") ASC
   `;
@@ -147,7 +147,7 @@ export async function getAdminDashboard(filters: DashboardFilters) {
 
   const recentInspections = await prisma.workOrder.findMany({
     where: {
-      status: { in: ['SUBMITTED', 'APPROVED'] },
+      status: { in: ['SUBMITTED', 'INSPECTION_COMPLETED'] },
     },
     include: {
       site: { select: { name: true } },
@@ -226,7 +226,7 @@ export async function getAdminDashboard(filters: DashboardFilters) {
 
   const allContractorAvgs = await prisma.workOrder.groupBy({
     by: ['contractorId'],
-    where: { status: 'APPROVED', overallScore: { not: null } },
+    where: { status: 'INSPECTION_COMPLETED', overallScore: { not: null } },
     _avg: { overallScore: true },
   });
 
@@ -327,7 +327,7 @@ export async function getInspectorDashboard(inspectorId: string) {
   const [assigned, inProgress, completed, avgResult] = await Promise.all([
     prisma.workOrder.count({ where: { inspectorId, status: 'ASSIGNED' } }),
     prisma.workOrder.count({ where: { inspectorId, status: 'IN_PROGRESS' } }),
-    prisma.workOrder.count({ where: { inspectorId, status: { in: ['SUBMITTED', 'APPROVED'] } } }),
+    prisma.workOrder.count({ where: { inspectorId, status: { in: ['SUBMITTED', 'INSPECTION_COMPLETED'] } } }),
     prisma.workOrder.aggregate({
       where: { inspectorId, overallScore: { not: null } },
       _avg: { overallScore: true },
@@ -343,10 +343,11 @@ export async function getInspectorDashboard(inspectorId: string) {
 }
 
 export async function getContractorDashboard(contractorId: string) {
-  const [assigned, submitted, completed, avgResult] = await Promise.all([
+  const [assigned, inProgress, submitted, completed, avgResult] = await Promise.all([
     prisma.workOrder.count({ where: { contractorId, status: 'ASSIGNED' } }),
+    prisma.workOrder.count({ where: { contractorId, status: 'IN_PROGRESS' } }),
     prisma.workOrder.count({ where: { contractorId, status: 'SUBMITTED' } }),
-    prisma.workOrder.count({ where: { contractorId, status: 'APPROVED' } }),
+    prisma.workOrder.count({ where: { contractorId, status: 'INSPECTION_COMPLETED' } }),
     prisma.workOrder.aggregate({
       where: { contractorId, overallScore: { not: null } },
       _avg: { overallScore: true },
@@ -355,6 +356,7 @@ export async function getContractorDashboard(contractorId: string) {
 
   return {
     assigned,
+    inProgress,
     submitted,
     completed,
     avgScore: Math.round((avgResult._avg.overallScore || 0) * 10) / 10,

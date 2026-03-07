@@ -23,11 +23,12 @@ export function authenticate(req: Request, res: Response, next: NextFunction) {
   try {
     const payload = verifyToken(token);
     req.user = {
-      userId: payload.userId,
+      identityId: payload.identityId,
       email: payload.email,
       role: payload.role as any,
-      isExternal: payload.isExternal,
+      displayName: payload.displayName,
       dbUserId: payload.dbUserId,
+      contractorId: payload.contractorId,
     };
     return next();
   } catch (_err) {
