@@ -206,7 +206,7 @@ export const requestUpload = async (params: {
       type: params.fileType,
       s3Key,
       s3Url: null,
-      s3Bucket: process.env.S3_BUCKET_NAME || '',
+      s3Bucket: process.env.SUPABASE_STORAGE_BUCKET || '',
       fileName: params.fileName,
       fileSize: params.fileSize,
       mimeType: params.contentType,
