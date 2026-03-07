@@ -34,7 +34,54 @@ router.get('/me', authorize(UserRole.INSPECTOR, UserRole.ADMIN), getMe);
  *         description: List of internal users
  */
 router.get('/', authorize(UserRole.ADMIN), list);
+
+/**
+ * @swagger
+ * /api/v1/users:
+ *   post:
+ *     summary: Create an internal user (ADMIN only)
+ *     tags: [Users]
+ *     security:
+ *       - BearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [displayName, email, password, role]
+ *             properties:
+ *               displayName: { type: string }
+ *               email: { type: string, format: email }
+ *               password: { type: string }
+ *               role:
+ *                 type: string
+ *                 enum: [ADMIN, INSPECTOR]
+ *     responses:
+ *       201:
+ *         description: User created
+ */
 router.post('/', authorize(UserRole.ADMIN), create);
+
+/**
+ * @swagger
+ * /api/v1/users/{id}:
+ *   get:
+ *     summary: Get internal user by id (ADMIN only)
+ *     tags: [Users]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string }
+ *     responses:
+ *       200:
+ *         description: User detail
+ *       404:
+ *         description: Not found
+ */
 router.get('/:id', authorize(UserRole.ADMIN), validate({ params: idParamSchema }), getById);
 
 /**

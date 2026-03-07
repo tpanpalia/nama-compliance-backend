@@ -15,6 +15,30 @@ import { EXTERNAL_USER_ROLES } from '../types/roles';
 
 const router = Router();
 
+/**
+ * @swagger
+ * /api/v1/evidence:
+ *   get:
+ *     summary: List confirmed evidence with optional filters
+ *     tags: [Evidence]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: workOrderId
+ *         schema: { type: string }
+ *       - in: query
+ *         name: checklistItemId
+ *         schema: { type: string }
+ *       - in: query
+ *         name: source
+ *         schema:
+ *           type: string
+ *           enum: [INSPECTOR, CONTRACTOR]
+ *     responses:
+ *       200:
+ *         description: Filtered confirmed evidence records
+ */
 router.get('/', authorize(UserRole.ADMIN, UserRole.INSPECTOR, EXTERNAL_USER_ROLES.CONTRACTOR, UserRole.REGULATOR), listEvidenceHandler);
 
 /**

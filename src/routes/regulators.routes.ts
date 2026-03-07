@@ -50,6 +50,25 @@ router.get('/', authorize(UserRole.ADMIN), list);
  */
 router.post('/', authorize(UserRole.ADMIN), create);
 
+/**
+ * @swagger
+ * /api/v1/regulators/{id}:
+ *   get:
+ *     summary: Get regulator by id (ADMIN only)
+ *     tags: [Regulators]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string }
+ *     responses:
+ *       200:
+ *         description: Regulator detail
+ *       404:
+ *         description: Not found
+ */
 router.get('/:id', authorize(UserRole.ADMIN), validate({ params: idParamSchema }), getById);
 
 /**

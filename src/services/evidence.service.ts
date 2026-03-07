@@ -15,7 +15,7 @@ import {
   generateObjectUrl,
   generateUploadPresignedUrl,
   getObjectMetadata,
-} from './s3.service';
+} from './storage.service';
 
 type EvidenceActor = {
   role?: string;

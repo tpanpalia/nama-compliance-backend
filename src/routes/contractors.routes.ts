@@ -41,6 +41,20 @@ const router = Router();
  */
 router.get('/', authorize(UserRole.ADMIN, UserRole.REGULATOR), contractorsController.list);
 
+/**
+ * @swagger
+ * /api/v1/contractors/me:
+ *   get:
+ *     summary: Get own contractor profile (CONTRACTOR only)
+ *     tags: [Contractors]
+ *     security:
+ *       - BearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Current contractor profile
+ *       403:
+ *         description: Contractor role required
+ */
 router.get('/me', authorize(EXTERNAL_USER_ROLES.CONTRACTOR), contractorsController.getMe);
 
 /**
