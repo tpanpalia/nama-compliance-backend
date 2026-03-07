@@ -207,6 +207,11 @@ model Evidence {
   latitude           Float?
   longitude          Float?
   accuracy           Float?
+  locationDisplayName String?
+  locationShortName  String?
+  locationCity       String?
+  locationSuburb     String?
+  locationCountry    String?
   isLocationFlagged  Boolean            @default(false)
   locationDistance   Float?
   isConfirmed        Boolean            @default(false)

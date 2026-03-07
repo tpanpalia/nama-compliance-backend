@@ -28,6 +28,7 @@ const options: swaggerJSDoc.Options = {
       { name: 'Stats' },
       { name: 'Reports' },
       { name: 'Regulators' },
+      { name: 'Utils' },
     ],
     paths: {
       '/health': {

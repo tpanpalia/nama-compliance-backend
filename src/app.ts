@@ -20,6 +20,7 @@ import regulatorsRouter from './routes/regulators.routes';
 import reportsRouter from './routes/reports.routes';
 import sitesRouter from './routes/sites.routes';
 import statsRouter from './routes/stats.routes';
+import utilsRouter from './routes/utils.routes';
 import usersRouter from './routes/users.routes';
 import workOrdersRouter from './routes/workOrders.routes';
 
@@ -160,6 +161,7 @@ app.use('/api/v1/contractors', authenticate, contractorsRouter);
 app.use('/api/v1/sites', authenticate, sitesRouter);
 app.use('/api/v1/users', authenticate, usersRouter);
 app.use('/api/v1/stats', authenticate, statsRouter);
+app.use('/api/v1/utils', authenticate, utilsRouter);
 app.use('/api/v1/reports', reportsRouter);
 app.use('/api/v1/regulators', authenticate, regulatorsRouter);
 

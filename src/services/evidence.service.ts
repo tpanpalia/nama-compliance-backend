@@ -1,7 +1,6 @@
 import { EvidenceSource, EvidenceType, Prisma } from '@prisma/client';
 import { prisma } from '../config/database';
 import {
-  GPS_MAX_ACCURACY_METERS,
   MAX_PHOTO_SIZE_BYTES,
   MAX_PHOTOS_PER_WORKORDER,
   MAX_VIDEO_SIZE_BYTES,
@@ -9,6 +8,7 @@ import {
 } from '../types';
 import { AppError } from '../utils/AppError';
 import { GPS_FLAG_THRESHOLD_METRES, haversineDistance } from '../utils/geoDistance';
+import { reverseGeocode } from '../utils/reverseGeocode';
 import {
   buildChecklistEvidenceKey,
   deleteObject,
@@ -82,9 +82,47 @@ export const listEvidence = async (filters: {
     };
   }
 
-  return prisma.evidence.findMany({
+  const evidence = await prisma.evidence.findMany({
     where,
     orderBy: { createdAt: 'desc' },
+  });
+
+  if (!evidence.length) {
+    return evidence;
+  }
+
+  const idList = evidence.map((item) => `'${item.id.replace(/'/g, "''")}'`).join(', ');
+  const locationRows = (await prisma.$queryRawUnsafe(`
+    SELECT
+      "id",
+      "locationDisplayName",
+      "locationShortName",
+      "locationCity",
+      "locationSuburb",
+      "locationCountry"
+    FROM "Evidence"
+    WHERE "id" IN (${idList})
+  `)) as Array<{
+    id: string;
+    locationDisplayName: string | null;
+    locationShortName: string | null;
+    locationCity: string | null;
+    locationSuburb: string | null;
+    locationCountry: string | null;
+  }>;
+
+  const locationMap = new Map(locationRows.map((row) => [row.id, row]));
+
+  return evidence.map((item) => {
+    const location = locationMap.get(item.id);
+    return {
+      ...item,
+      locationDisplayName: location?.locationDisplayName ?? null,
+      locationShortName: location?.locationShortName ?? null,
+      locationCity: location?.locationCity ?? null,
+      locationSuburb: location?.locationSuburb ?? null,
+      locationCountry: location?.locationCountry ?? null,
+    };
   });
 };
 
@@ -169,14 +207,15 @@ export const requestUpload = async (params: {
     if (params.latitude === undefined || params.longitude === undefined || params.accuracy === undefined) {
       throw new AppError('Contractor evidence requires GPS coordinates and accuracy', 400, 'GPS_REQUIRED');
     }
-
-    if (params.accuracy > GPS_MAX_ACCURACY_METERS) {
-      throw new AppError(`GPS accuracy must be within ${GPS_MAX_ACCURACY_METERS} meters`, 400, 'GPS_INACCURATE');
-    }
   }
 
   let locationDistance: number | null = null;
   let isLocationFlagged = false;
+  let locationDisplayName: string | null = null;
+  let locationShortName: string | null = null;
+  let locationCity: string | null = null;
+  let locationSuburb: string | null = null;
+  let locationCountry: string | null = null;
 
   if (
     params.latitude !== undefined &&
@@ -194,31 +233,63 @@ export const requestUpload = async (params: {
     isLocationFlagged = locationDistance > GPS_FLAG_THRESHOLD_METRES;
   }
 
+  if (params.latitude !== undefined && params.longitude !== undefined) {
+    const geocoded = await reverseGeocode(params.latitude, params.longitude);
+    locationDisplayName = geocoded.displayName || null;
+    locationShortName = geocoded.shortName || null;
+    locationCity = geocoded.city;
+    locationSuburb = geocoded.suburb;
+    locationCountry = geocoded.country;
+  }
+
   const s3Key = buildChecklistEvidenceKey(params.workOrderId, params.checklistItemId, params.contentType);
   const upload = await generateUploadPresignedUrl(s3Key, params.contentType);
 
+  const evidenceData = {
+    workOrderId: params.workOrderId,
+    checklistItemId: params.checklistItemId,
+    checklistResponseId: null,
+    source: params.source,
+    type: params.fileType,
+    s3Key,
+    s3Url: null,
+    s3Bucket: process.env.SUPABASE_STORAGE_BUCKET || '',
+    fileName: params.fileName,
+    fileSize: params.fileSize,
+    mimeType: params.contentType,
+    latitude: params.latitude,
+    longitude: params.longitude,
+    accuracy: params.accuracy,
+    capturedAt: params.capturedAt ? new Date(params.capturedAt) : new Date(),
+    isLocationFlagged,
+    locationDistance: locationDistance !== null ? Math.round(locationDistance) : null,
+    isConfirmed: false,
+  } as any;
+
   const evidence = await prisma.evidence.create({
-    data: {
-      workOrderId: params.workOrderId,
-      checklistItemId: params.checklistItemId,
-      checklistResponseId: null,
-      source: params.source,
-      type: params.fileType,
-      s3Key,
-      s3Url: null,
-      s3Bucket: process.env.SUPABASE_STORAGE_BUCKET || '',
-      fileName: params.fileName,
-      fileSize: params.fileSize,
-      mimeType: params.contentType,
-      latitude: params.latitude,
-      longitude: params.longitude,
-      accuracy: params.accuracy,
-      capturedAt: params.capturedAt ? new Date(params.capturedAt) : new Date(),
-      isLocationFlagged,
-      locationDistance: locationDistance !== null ? Math.round(locationDistance) : null,
-      isConfirmed: false,
-    },
+    data: evidenceData,
   });
+
+  if (locationDisplayName || locationShortName || locationCity || locationSuburb || locationCountry) {
+    await prisma.$executeRawUnsafe(
+      `
+        UPDATE "Evidence"
+        SET
+          "locationDisplayName" = $1,
+          "locationShortName" = $2,
+          "locationCity" = $3,
+          "locationSuburb" = $4,
+          "locationCountry" = $5
+        WHERE "id" = $6
+      `,
+      locationDisplayName,
+      locationShortName,
+      locationCity,
+      locationSuburb,
+      locationCountry,
+      evidence.id
+    );
+  }
 
   if (params.source === EvidenceSource.CONTRACTOR && workOrder.status === 'ASSIGNED') {
     await prisma.workOrder.update({
