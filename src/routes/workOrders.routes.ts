@@ -180,4 +180,32 @@ router.patch(
   workOrdersController.assignInspector
 );
 
+/**
+ * @swagger
+ * /api/v1/work-orders/{id}/submit:
+ *   patch:
+ *     summary: Submit work order for inspection (CONTRACTOR only)
+ *     tags: [Work Orders]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string }
+ *     responses:
+ *       200:
+ *         description: Work order submitted for inspection
+ *       400:
+ *         description: Invalid status or missing evidence
+ *       404:
+ *         description: Work order not found or not accessible
+ */
+router.patch(
+  '/:id/submit',
+  authorize(EXTERNAL_USER_ROLES.CONTRACTOR),
+  validate({ params: idParamSchema }),
+  workOrdersController.submitWorkOrder
+);
+
 export default router;

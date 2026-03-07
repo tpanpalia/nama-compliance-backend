@@ -88,3 +88,20 @@ export const getStats = async (_req: Request, res: Response, next: NextFunction)
     next(err);
   }
 };
+
+export const submitWorkOrder = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const contractorId = req.user!.contractorId;
+    if (!contractorId) {
+      return res.status(403).json({ error: 'Contractor profile not found' });
+    }
+
+    const data = await WorkOrdersService.submitWorkOrder(req.params.id, contractorId, req.user!.dbUserId);
+    return res.json({
+      data,
+      message: 'Work order submitted for inspection.',
+    });
+  } catch (err) {
+    return next(err);
+  }
+};

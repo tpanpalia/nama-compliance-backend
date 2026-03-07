@@ -391,10 +391,85 @@ export async function assignInspector(workOrderId: string, inspectorId: string) 
   return { ...updated, displayStatus: computeDisplayStatus(updated) };
 }
 
-async function logAction(workOrderId: string, action: string, details: string) {
+export async function submitWorkOrder(workOrderId: string, contractorId: string, actorUserId?: string) {
+  const workOrder = await prisma.workOrder.findFirst({
+    where: {
+      id: workOrderId,
+      contractorId,
+    },
+    include: {
+      site: true,
+    },
+  });
+
+  if (!workOrder) {
+    throw new AppError('Work order not found or not accessible', 404, 'NOT_FOUND');
+  }
+
+  if (workOrder.status !== 'ASSIGNED' && workOrder.status !== 'IN_PROGRESS') {
+    throw new AppError(
+      `Cannot submit a work order with status ${workOrder.status}. Only ASSIGNED or IN_PROGRESS work orders can be submitted.`,
+      400,
+      'INVALID_WORK_ORDER_STATUS'
+    );
+  }
+
+  const evidenceCount = await prisma.evidence.count({
+    where: {
+      workOrderId,
+      isConfirmed: true,
+    },
+  });
+
+  if (evidenceCount === 0) {
+    throw new AppError(
+      'Please upload at least one photo or video as evidence before submitting.',
+      400,
+      'EVIDENCE_REQUIRED'
+    );
+  }
+
+  const updated = await prisma.workOrder.update({
+    where: { id: workOrderId },
+    data: {
+      status: 'SUBMITTED',
+      submittedAt: new Date(),
+    },
+    include: DETAIL_INCLUDE,
+  });
+
+  await logAction(
+    workOrderId,
+    'SUBMITTED',
+    `Work order submitted for inspection. Evidence count: ${evidenceCount}`,
+    actorUserId,
+    {
+      previousStatus: workOrder.status,
+      evidenceCount,
+    }
+  );
+
+  return { ...updated, displayStatus: computeDisplayStatus(updated) };
+}
+
+async function logAction(
+  workOrderId: string,
+  action: string,
+  details: string,
+  userId?: string,
+  extra?: Record<string, unknown>
+) {
   await prisma.auditLog
     .create({
-      data: { workOrderId, action, newValue: { details } as any },
+      data: {
+        workOrderId,
+        userId: userId || undefined,
+        action,
+        newValue: {
+          details,
+          ...(extra || {}),
+        } as any,
+      },
     })
     .catch(() => {});
 }
