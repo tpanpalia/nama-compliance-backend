@@ -331,40 +331,47 @@ export async function getContractorPerformance(id: string) {
 
   const monthlyTrend = await prisma.$queryRaw<Array<{ month: string; avgScore: number }>>`
     SELECT
-      TO_CHAR(DATE_TRUNC('month', "approvedAt"), 'Mon') as month,
-      ROUND(AVG("overallScore")::numeric, 1)::float as "avgScore"
-    FROM "WorkOrder"
-    WHERE
-      "contractorId" = ${id}
-      AND status = 'INSPECTION_COMPLETED'
-      AND "overallScore" IS NOT NULL
-      AND "approvedAt" >= NOW() - INTERVAL '6 months'
-    GROUP BY DATE_TRUNC('month', "approvedAt")
-    ORDER BY DATE_TRUNC('month', "approvedAt") ASC
+      TO_CHAR(months.month_start, 'Mon') as month,
+      COALESCE(ROUND(AVG(wo."overallScore")::numeric, 1)::float, 0) as "avgScore"
+    FROM generate_series(
+      DATE_TRUNC('year', NOW()),
+      DATE_TRUNC('year', NOW()) + INTERVAL '11 months',
+      INTERVAL '1 month'
+    ) AS months(month_start)
+    LEFT JOIN "WorkOrder" wo
+      ON DATE_TRUNC('month', wo."approvedAt") = months.month_start
+      AND wo."contractorId" = ${id}
+      AND wo.status = 'INSPECTION_COMPLETED'
+      AND wo."overallScore" IS NOT NULL
+    GROUP BY months.month_start
+    ORDER BY months.month_start ASC
   `;
 
-  const POINTS: Record<string, number> = {
-    COMPLIANT: 100,
-    PARTIAL: 50,
-    NON_COMPLIANT: 0,
-  };
-  const categoryTotals: Record<string, { sum: number; count: number }> = {};
-
-  workOrders.forEach((wo) => {
-    wo.checklist?.responses.forEach((r) => {
-      const section = r.item.section.name;
-      if (!categoryTotals[section]) categoryTotals[section] = { sum: 0, count: 0 };
-      if (r.rating) {
-        categoryTotals[section].sum += POINTS[r.rating] || 0;
-        categoryTotals[section].count += 1;
-      }
-    });
-  });
-
-  const complianceByCategory = Object.entries(categoryTotals).map(([name, val]) => ({
-    name,
-    avgScore: val.count ? Math.round((val.sum / val.count) * 10) / 10 : 0,
-  }));
+  const complianceByCategory = await prisma.$queryRaw<Array<{ name: string; avgScore: number }>>`
+    SELECT
+      cs.name as name,
+      ROUND(
+        AVG(
+          CASE cr.rating
+            WHEN 'COMPLIANT' THEN 100
+            WHEN 'PARTIAL' THEN 50
+            WHEN 'NON_COMPLIANT' THEN 0
+          END
+        )::numeric,
+        1
+      )::float as "avgScore"
+    FROM "WorkOrder" wo
+    JOIN "WorkOrderChecklist" woc ON woc."workOrderId" = wo.id
+    JOIN "ChecklistResponse" cr ON cr."checklistId" = woc.id
+    JOIN "ChecklistItem" ci ON ci.id = cr."itemId"
+    JOIN "ChecklistSection" cs ON cs.id = ci."sectionId"
+    WHERE
+      wo."contractorId" = ${id}
+      AND wo.status = 'INSPECTION_COMPLETED'
+      AND cr.rating IS NOT NULL
+    GROUP BY cs.id, cs.name, cs."order"
+    ORDER BY cs."order" ASC, cs.name ASC
+  `;
 
   const inspectionHistory = workOrders.slice(0, 20).map((wo) => ({
     id: wo.id,
