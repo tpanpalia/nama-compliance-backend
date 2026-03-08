@@ -73,9 +73,6 @@ function nextPhoto() {
 }
 
 const SEED_MONTHS: MonthSlot[] = [
-  { year: 2025, month: 9 },
-  { year: 2025, month: 10 },
-  { year: 2025, month: 11 },
   { year: 2026, month: 0 },
   { year: 2026, month: 1 },
   { year: 2026, month: 2 },
@@ -885,44 +882,51 @@ async function main() {
   console.log(`✓ Created ${accessRequests.length} access requests`);
 
   console.log('Creating sample report logs...');
-  const reportLogs = [
+  const reportKeys = [
+    'reports/performance-summary-report.pdf',
+    'reports/contractor-performance-report.pdf',
+  ];
+
+  const { error: deleteReportLogsError } = await supabase
+    .from(TABLES.reportLog)
+    .delete()
+    .in('fileKey', reportKeys);
+
+  if (deleteReportLogsError) throw deleteReportLogsError;
+
+  await insertRows(TABLES.reportLog, [
     {
       reportType: 'Performance Summary',
       subject: 'All Regions',
-      period: 'Oct 2025 - Mar 2026',
-      fileKey: 'reports/sample/performance-summary-all-regions.pdf',
-      filters: { years: [2025, 2026], months: [10, 11, 12, 1, 2, 3] },
-    },
-    {
-      reportType: 'Performance Summary',
-      subject: 'Muscat',
-      period: 'Jan 2026 - Mar 2026',
-      fileKey: 'reports/sample/performance-summary-muscat.pdf',
-      filters: { years: [2026], months: [1, 2, 3], regions: ['Muscat'] },
+      period: '2026',
+      generatedBy: adminUser.id,
+      fileKey: 'reports/performance-summary-report.pdf',
+      fileUrl:
+        'https://liddpvjkdmijehpbpjib.supabase.co' +
+        '/storage/v1/object/public/' +
+        'compliance-files/reports/' +
+        'performance-summary-report.pdf',
+      fileSize: 0,
+      filters: {},
+      generatedAt: new Date().toISOString(),
     },
     {
       reportType: 'Contractor Performance',
-      subject: 'Al Noor Construction LLC',
+      subject: 'All Regions',
       period: '2026',
-      fileKey: 'reports/sample/contractor-performance-al-noor.pdf',
-      filters: { years: [2026], contractorName: 'Al Noor Construction LLC' },
-    },
-  ];
-
-  for (const log of reportLogs) {
-    await insertRow(TABLES.reportLog, {
-      reportType: log.reportType,
-      subject: log.subject,
-      period: log.period,
       generatedBy: adminUser.id,
-      generatedAt: '2026-03-01T12:00:00.000Z',
-      fileKey: log.fileKey,
-      fileUrl: `https://placeholder.url/${log.fileKey}`,
-      fileSize: 45000,
-      filters: log.filters,
-    });
-  }
-  console.log(`✓ Created ${reportLogs.length} report logs`);
+      fileKey: 'reports/contractor-performance-report.pdf',
+      fileUrl:
+        'https://liddpvjkdmijehpbpjib.supabase.co' +
+        '/storage/v1/object/public/' +
+        'compliance-files/reports/' +
+        'contractor-performance-report.pdf',
+      fileSize: 0,
+      filters: {},
+      generatedAt: new Date().toISOString(),
+    },
+  ]);
+  console.log('✓ Created 2 report logs');
 
   console.log('');
   console.log('═══════════════════════════════');
