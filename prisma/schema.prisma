@@ -19,6 +19,7 @@ model User {
   updatedAt          DateTime    @default(now()) @updatedAt @db.Timestamptz(6)
   identity           Identity?
   auditLogs          AuditLog[]
+  reportLogs         ReportLog[]
   approvedWorkOrders WorkOrder[] @relation("ApproverWorkOrders")
   createdWorkOrders  WorkOrder[] @relation("CreatorWorkOrders")
   assignedWorkOrders WorkOrder[] @relation("InspectorWorkOrders")
@@ -41,6 +42,7 @@ model Contractor {
   updatedAt     DateTime       @default(now()) @updatedAt @db.Timestamptz(6)
   identity      Identity?
   accessRequest AccessRequest?
+  itemComments  ContractorItemComment[]
   workOrders    WorkOrder[]
   @@index([isActive])
 }
@@ -101,6 +103,7 @@ model WorkOrder {
   createdAt       DateTime            @default(now()) @db.Timestamptz(6)
   updatedAt       DateTime            @default(now()) @updatedAt @db.Timestamptz(6)
   auditLogs       AuditLog[]
+  contractorComments ContractorItemComment[]
   evidence        Evidence[]
   approvedBy      User?               @relation("ApproverWorkOrders", fields: [approvedById], references: [id], onDelete: NoAction, onUpdate: NoAction)
   contractor      Contractor?         @relation(fields: [contractorId], references: [id], onDelete: NoAction, onUpdate: NoAction)
@@ -116,6 +119,24 @@ model WorkOrder {
   @@index([reference])
   @@index([createdAt])
   @@index([scheduledDate])
+}
+
+model ContractorItemComment {
+  id              String     @id @default(uuid())
+  workOrderId     String
+  checklistItemId String
+  contractorId    String
+  comment         String
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+  workOrder       WorkOrder  @relation(fields: [workOrderId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  contractor      Contractor @relation(fields: [contractorId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@unique([workOrderId, checklistItemId, contractorId])
+  @@map("ContractorItemComment")
+  @@index([workOrderId])
+  @@index([contractorId])
+  @@index([checklistItemId])
 }
 
 model ChecklistTemplate {
@@ -288,6 +309,24 @@ model AccessRequestDocument {
   accessRequest   AccessRequest  @relation(fields: [accessRequestId], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
   @@index([accessRequestId])
+}
+
+model ReportLog {
+  id              String   @id @default(uuid())
+  reportType      String
+  subject         String
+  period          String
+  generatedBy     String
+  generatedAt     DateTime @default(now())
+  fileKey         String
+  fileUrl         String
+  fileSize        Int?
+  filters         Json
+  generatedByUser User     @relation(fields: [generatedBy], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@map("ReportLog")
+  @@index([generatedAt])
+  @@index([generatedBy])
 }
 
 enum UserRole {

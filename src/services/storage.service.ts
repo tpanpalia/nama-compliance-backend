@@ -131,3 +131,29 @@ export const generateObjectUrl = (key: string): string => {
   const { data } = supabaseAdmin.storage.from(SUPABASE_STORAGE_BUCKET).getPublicUrl(key);
   return data.publicUrl;
 };
+
+export const uploadReportPDF = async (
+  buffer: Buffer,
+  reportType: string,
+  filename: string
+): Promise<{ key: string; url: string; size: number }> => {
+  ensureStorageConfig();
+
+  const key = `reports/${reportType}/${Date.now()}_${filename}`;
+  const { data, error } = await supabaseAdmin.storage.from(SUPABASE_STORAGE_BUCKET).upload(key, buffer, {
+    contentType: 'application/pdf',
+    upsert: false,
+  });
+
+  if (error || !data) {
+    throw new AppError(error?.message || 'Failed to upload report PDF', 500, 'STORAGE_ERROR');
+  }
+
+  const { data: urlData } = supabaseAdmin.storage.from(SUPABASE_STORAGE_BUCKET).getPublicUrl(data.path);
+
+  return {
+    key,
+    url: urlData.publicUrl,
+    size: buffer.length,
+  };
+};

@@ -1,3 +1,4 @@
+import { WorkOrderStatus } from '@prisma/client';
 import { z } from 'zod';
 import { prisma } from '../config/database';
 import { AppError } from '../utils/AppError';
@@ -23,11 +24,52 @@ const POINTS: Record<string, number> = {
   NON_COMPLIANT: 0,
 };
 
+type ContractorPerformanceWorkOrder = {
+  id: string;
+  reference: string;
+  title: string;
+  status: 'SUBMITTED' | 'INSPECTION_COMPLETED';
+  priority: string;
+  submittedAt: Date | null;
+  approvedAt: Date | null;
+  overallScore: number | null;
+  complianceBand: string | null;
+  contractorId: string | null;
+  site: { name: string; location: string; region: string } | null;
+  contractor: { id: string; contractorId: string; companyName: string; crNumber: string } | null;
+  inspector: { id: string; displayName: string } | null;
+};
+
 function scoreColor(score: number): string {
   if (score >= 90) return 'EXCELLENT';
   if (score >= 70) return 'GOOD';
   if (score >= 50) return 'FAIR';
   return 'POOR';
+}
+
+function buildDateFilter(years: number[], months: number[]) {
+  if (years.length === 0) return {};
+
+  if (months.length > 0) {
+    const dateRanges = [];
+    for (const year of years) {
+      for (const month of months) {
+        const start = new Date(year, month - 1, 1);
+        const end = new Date(year, month, 0, 23, 59, 59);
+        dateRanges.push({ submittedAt: { gte: start, lte: end } });
+      }
+    }
+    return { OR: dateRanges };
+  }
+
+  const dateRanges = years.map((year) => ({
+    submittedAt: {
+      gte: new Date(year, 0, 1),
+      lte: new Date(year, 11, 31, 23, 59, 59),
+    },
+  }));
+
+  return dateRanges.length === 1 ? dateRanges[0] : { OR: dateRanges };
 }
 
 export async function getWorkOrderReportData(workOrderId: string) {
@@ -486,5 +528,199 @@ export async function getSystemSummaryReportData(year?: number, month?: number) 
     monthlyTrend,
     contractorLeaderboard: contractorPerformance,
     categoryBreakdown,
+  };
+}
+
+export async function generateContractorPerformanceReport(contractorIds: string[], years: number[], months: number[]) {
+  const contractors = contractorIds.length
+    ? await prisma.contractor.findMany({
+        where: { id: { in: contractorIds } },
+        select: { id: true, companyName: true, contractorId: true, crNumber: true },
+      })
+    : [];
+
+  const statuses: WorkOrderStatus[] = ['SUBMITTED', 'INSPECTION_COMPLETED'];
+  const where = {
+    ...(contractorIds.length > 0 ? { contractorId: { in: contractorIds } } : {}),
+    ...buildDateFilter(years, months),
+    status: { in: statuses },
+  };
+
+  const workOrders = (await prisma.workOrder.findMany({
+    where,
+    select: {
+      id: true,
+      reference: true,
+      title: true,
+      status: true,
+      priority: true,
+      submittedAt: true,
+      approvedAt: true,
+      overallScore: true,
+      complianceBand: true,
+      contractorId: true,
+      site: {
+        select: {
+          name: true,
+          location: true,
+          region: true,
+        },
+      },
+      contractor: {
+        select: {
+          id: true,
+          contractorId: true,
+          companyName: true,
+          crNumber: true,
+        },
+      },
+      inspector: {
+        select: {
+          id: true,
+          displayName: true,
+        },
+      },
+    },
+    orderBy: { submittedAt: 'desc' },
+  })) as unknown as ContractorPerformanceWorkOrder[];
+
+  const contractorMap = new Map<string, {
+    contractorId: string | null;
+    companyName: string;
+    crNumber: string;
+    totalWorkOrders: number;
+    submittedCount: number;
+    completedCount: number;
+    totalScore: number;
+    scoredCount: number;
+  }>();
+
+  for (const workOrder of workOrders) {
+    const key = workOrder.contractorId ?? 'unknown';
+    const existing = contractorMap.get(key) ?? {
+      contractorId: workOrder.contractorId,
+      companyName: workOrder.contractor?.companyName ?? 'Unknown Contractor',
+      crNumber: workOrder.contractor?.crNumber ?? '-',
+      totalWorkOrders: 0,
+      submittedCount: 0,
+      completedCount: 0,
+      totalScore: 0,
+      scoredCount: 0,
+    };
+
+    existing.totalWorkOrders += 1;
+    if (workOrder.status === 'SUBMITTED') existing.submittedCount += 1;
+    if (workOrder.status === 'INSPECTION_COMPLETED') existing.completedCount += 1;
+    if (typeof workOrder.overallScore === 'number') {
+      existing.totalScore += workOrder.overallScore;
+      existing.scoredCount += 1;
+    }
+
+    contractorMap.set(key, existing);
+  }
+
+  const summary = Array.from(contractorMap.values()).map((item) => ({
+    contractorId: item.contractorId,
+    companyName: item.companyName,
+    crNumber: item.crNumber,
+    totalWorkOrders: item.totalWorkOrders,
+    submittedCount: item.submittedCount,
+    completedCount: item.completedCount,
+    avgScore: item.scoredCount ? Math.round((item.totalScore / item.scoredCount) * 10) / 10 : 0,
+  }));
+
+  return {
+    contractors,
+    data: {
+      reportType: 'CONTRACTOR_PERFORMANCE',
+      generatedAt: new Date().toISOString(),
+      filters: { contractorIds, years, months },
+      summary,
+      workOrders: workOrders.map((workOrder) => ({
+        id: workOrder.id,
+        reference: workOrder.reference,
+        title: workOrder.title,
+        status: workOrder.status,
+        priority: workOrder.priority,
+        submittedAt: workOrder.submittedAt?.toISOString() ?? null,
+        approvedAt: workOrder.approvedAt?.toISOString() ?? null,
+        overallScore: workOrder.overallScore,
+        complianceBand: workOrder.complianceBand,
+        site: workOrder.site
+          ? {
+              name: workOrder.site.name,
+              location: workOrder.site.location,
+              region: workOrder.site.region,
+            }
+          : null,
+        contractor: workOrder.contractor
+          ? {
+              id: workOrder.contractor.id,
+              contractorId: workOrder.contractor.contractorId,
+              companyName: workOrder.contractor.companyName,
+              crNumber: workOrder.contractor.crNumber,
+            }
+          : null,
+        inspector: workOrder.inspector
+          ? {
+              id: workOrder.inspector.id,
+              displayName: workOrder.inspector.displayName,
+            }
+          : null,
+      })),
+    },
+  };
+}
+
+export async function generatePerformanceSummaryReport(contractorIds: string[], years: number[], months: number[]) {
+  const contractors = contractorIds.length
+    ? await prisma.contractor.findMany({
+        where: { id: { in: contractorIds } },
+        select: { id: true, companyName: true },
+      })
+    : [];
+
+  const summaryWhere = {
+    ...(contractorIds.length > 0 ? { contractorId: { in: contractorIds } } : {}),
+    ...buildDateFilter(years, months),
+  };
+
+  const contractorStats = await prisma.workOrder.groupBy({
+    by: ['contractorId'],
+    where: summaryWhere,
+    _count: { id: true },
+    _avg: { overallScore: true },
+  });
+
+  const contractorLookup = contractorStats
+    .map((row) => row.contractorId)
+    .filter((value): value is string => Boolean(value));
+
+  const contractorMeta = contractorLookup.length
+    ? await prisma.contractor.findMany({
+        where: { id: { in: contractorLookup } },
+        select: { id: true, companyName: true, contractorId: true, crNumber: true },
+      })
+    : [];
+  const contractorMetaMap = new Map(contractorMeta.map((item) => [item.id, item]));
+
+  return {
+    contractors,
+    data: {
+      reportType: 'PERFORMANCE_SUMMARY',
+      generatedAt: new Date().toISOString(),
+      filters: { contractorIds, years, months },
+      contractors: contractorStats.map((row) => {
+        const meta = row.contractorId ? contractorMetaMap.get(row.contractorId) : null;
+        return {
+          contractorId: row.contractorId,
+          companyName: meta?.companyName ?? 'Unknown Contractor',
+          contractorCode: meta?.contractorId ?? null,
+          crNumber: meta?.crNumber ?? null,
+          totalWorkOrders: row._count.id,
+          avgScore: Math.round((((row._avg?.overallScore as number | null) || 0) * 10)) / 10,
+        };
+      }),
+    },
   };
 }

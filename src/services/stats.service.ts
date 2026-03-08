@@ -97,14 +97,6 @@ export async function getAdminDashboard(filters: DashboardFilters) {
   const prevAvgCompliance = Math.round((previousAvg._avg.overallScore || 0) * 10) / 10;
   const complianceTrend = Math.round((avgCompliance - prevAvgCompliance) * 10) / 10;
 
-  const [currentPending, previousPending] = await Promise.all([
-    prisma.workOrder.count({ where: { status: 'SUBMITTED' } }),
-    prisma.workOrder.count({
-      where: { status: 'SUBMITTED', createdAt: previous },
-    }),
-  ]);
-  const pendingTrend = currentPending - previousPending;
-
   const monthlyTrend = await prisma.$queryRaw<Array<{ month: string; inspectionCount: number; avgCompliance: number }>>`
     SELECT
       TO_CHAR(DATE_TRUNC('month', "createdAt"), 'Mon') as month,
@@ -248,19 +240,11 @@ export async function getAdminDashboard(filters: DashboardFilters) {
     alerts.push(`${activeBelow.length} contractors compliance dropped below 70%`);
   }
 
-  const pendingCount = await prisma.workOrder.count({
-    where: { status: 'SUBMITTED' },
-  });
-  if (pendingCount > 0) {
-    alerts.push(`${pendingCount} inspection report${pendingCount > 1 ? 's' : ''} pending admin review`);
-  }
-
   return {
     kpis: {
       totalInspections: { value: currentInspections, trend: inspectionTrend, trendType: 'percent' },
       activeContractors: { value: currentActiveContractors, trend: contractorTrend, trendType: 'absolute' },
       avgCompliance: { value: avgCompliance, trend: complianceTrend, trendType: 'percent' },
-      pendingReviews: { value: currentPending, trend: pendingTrend, trendType: 'absolute' },
     },
     monthlyTrend,
     complianceByCategory: categoryData,

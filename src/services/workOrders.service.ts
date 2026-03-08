@@ -306,6 +306,174 @@ export async function getWorkOrderById(
   };
 }
 
+export async function getWorkOrderChecklistDetail(id: string) {
+  const workOrder = await prisma.workOrder.findFirst({
+    where: { id },
+    include: {
+      site: true,
+      contractor: true,
+      inspector: true,
+    },
+  });
+
+  if (!workOrder) {
+    throw new AppError('Work order not found', 404, 'NOT_FOUND');
+  }
+
+  const template = await prisma.checklistTemplate.findFirst({
+    where: { isActive: true },
+    include: {
+      sections: {
+        orderBy: { order: 'asc' },
+        include: {
+          items: {
+            orderBy: { order: 'asc' },
+          },
+        },
+      },
+    },
+  });
+
+  if (!template) {
+    throw new AppError('No active checklist template found', 404, 'NOT_FOUND');
+  }
+
+  const allEvidence = await prisma.evidence.findMany({
+    where: {
+      workOrderId: id,
+      isConfirmed: true,
+    },
+    orderBy: { createdAt: 'asc' },
+  });
+
+  const contractorComments = await prisma.contractorItemComment.findMany({
+    where: { workOrderId: id },
+  });
+
+  const workOrderChecklist = await prisma.workOrderChecklist.findFirst({
+    where: { workOrderId: id },
+    include: {
+      responses: {
+        include: {
+          item: true,
+        },
+      },
+    },
+  });
+
+  const evidenceByItem: Record<
+    string,
+    {
+      contractor: typeof allEvidence;
+      inspector: typeof allEvidence;
+    }
+  > = {};
+
+  for (const evidence of allEvidence) {
+    if (!evidence.checklistItemId) continue;
+    if (!evidenceByItem[evidence.checklistItemId]) {
+      evidenceByItem[evidence.checklistItemId] = {
+        contractor: [],
+        inspector: [],
+      };
+    }
+
+    if (evidence.source === 'CONTRACTOR') {
+      evidenceByItem[evidence.checklistItemId].contractor.push(evidence);
+    } else {
+      evidenceByItem[evidence.checklistItemId].inspector.push(evidence);
+    }
+  }
+
+  type ChecklistResponseEntry = NonNullable<typeof workOrderChecklist> extends { responses: infer R }
+    ? R extends Array<infer Item>
+      ? Item
+      : never
+    : never;
+
+  const responseByItem: Record<string, ChecklistResponseEntry> = {};
+  for (const response of workOrderChecklist?.responses ?? []) {
+    responseByItem[response.itemId] = response;
+  }
+
+  const commentByItem: Record<string, string> = {};
+  for (const contractorComment of contractorComments) {
+    commentByItem[contractorComment.checklistItemId] = contractorComment.comment;
+  }
+
+  const statusDisplayMap: Record<string, string> = {
+    PENDING: 'Unassigned',
+    ASSIGNED: 'WIP at Site',
+    IN_PROGRESS: 'WIP at Site',
+    SUBMITTED: 'Submitted for Inspection',
+    INSPECTION_COMPLETED: 'Inspection Complete',
+    REJECTED: 'Rejected',
+    REOPENED: 'Reopened',
+  };
+
+  return {
+    workOrderId: id,
+    status: workOrder.status,
+    statusDisplay: statusDisplayMap[workOrder.status] ?? workOrder.status,
+    contractor: workOrder.contractor
+      ? {
+          companyName: workOrder.contractor.companyName,
+          crNumber: workOrder.contractor.crNumber,
+          contractorId: workOrder.contractor.contractorId,
+        }
+      : null,
+    inspector: workOrder.inspector
+      ? {
+          displayName: workOrder.inspector.displayName,
+          isActive: workOrder.inspector.isActive,
+        }
+      : null,
+    overallScore: workOrder.overallScore,
+    sections: template.sections.map((section) => ({
+      id: section.id,
+      name: section.name,
+      weight: section.weight,
+      orderIndex: section.order,
+      items: section.items.map((item) => {
+        const evidence = evidenceByItem[item.id] ?? { contractor: [], inspector: [] };
+        const response = responseByItem[item.id] ?? null;
+
+        return {
+          id: item.id,
+          name: item.text,
+          description: null,
+          weight: item.weight,
+          orderIndex: item.order,
+          contractor: {
+            evidence: evidence.contractor.map((entry) => ({
+              id: entry.id,
+              type: entry.type,
+              s3Url: entry.s3Url,
+              capturedAt: entry.capturedAt,
+              isLocationFlagged: entry.isLocationFlagged,
+              locationDistance: entry.locationDistance,
+              latitude: entry.latitude,
+              longitude: entry.longitude,
+            })),
+            comment: commentByItem[item.id] ?? null,
+          },
+          inspector: {
+            evidence: evidence.inspector.map((entry) => ({
+              id: entry.id,
+              type: entry.type,
+              s3Url: entry.s3Url,
+              capturedAt: entry.capturedAt,
+            })),
+            rating: response?.rating ?? null,
+            comment: response?.comment ?? null,
+            ratedAt: response?.updatedAt ?? null,
+          },
+        };
+      }),
+    })),
+  };
+}
+
 export const CreateWorkOrderSchema = z.object({
   siteId: z.string().uuid(),
   title: z.string().min(3).optional(),

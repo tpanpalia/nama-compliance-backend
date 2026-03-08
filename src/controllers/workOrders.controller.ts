@@ -38,6 +38,15 @@ export const getById = async (req: Request, res: Response, next: NextFunction) =
   }
 };
 
+export const getChecklistDetail = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const data = await WorkOrdersService.getWorkOrderChecklistDetail(req.params.id);
+    res.json({ data });
+  } catch (err) {
+    next(err);
+  }
+};
+
 export const create = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const parsed = CreateWorkOrderSchema.safeParse(req.body);

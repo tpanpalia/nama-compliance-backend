@@ -7,6 +7,13 @@ import { EXTERNAL_USER_ROLES } from '../types/roles';
 
 const router = Router();
 
+router.get(
+  '/recent',
+  authenticate,
+  authorize(UserRole.ADMIN, UserRole.REGULATOR),
+  ReportsController.getRecentReports
+);
+
 /**
  * @swagger
  * /api/v1/reports/work-order/{workOrderId}:
@@ -86,6 +93,13 @@ router.get(
   authenticate,
   authorize(UserRole.ADMIN, UserRole.REGULATOR),
   ReportsController.getSystemSummaryReport
+);
+
+router.post(
+  '/generate',
+  authenticate,
+  authorize(UserRole.ADMIN, UserRole.REGULATOR),
+  ReportsController.generateReport
 );
 
 export default router;

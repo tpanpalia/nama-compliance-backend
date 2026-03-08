@@ -88,6 +88,13 @@ router.post('/', authorize(UserRole.ADMIN), workOrdersController.create);
  */
 router.get('/stats', authorize(UserRole.ADMIN, UserRole.INSPECTOR), workOrdersController.getStats);
 
+router.get(
+  '/:id/checklist-detail',
+  authorize(UserRole.ADMIN, UserRole.REGULATOR),
+  validate({ params: idParamSchema }),
+  workOrdersController.getChecklistDetail
+);
+
 /**
  * @swagger
  * /api/v1/work-orders/{id}:
