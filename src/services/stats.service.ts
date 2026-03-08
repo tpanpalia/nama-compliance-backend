@@ -1,5 +1,5 @@
 import { prisma } from '../config/database';
-import { ACTIVE_WO_STATUSES, activeProjectsFilter } from '../utils/queryHelpers';
+import { ACTIVE_WO_STATUSES, activeProjectsFilter, getOverdueFilter } from '../utils/queryHelpers';
 
 interface DashboardFilters {
   year?: number;
@@ -222,13 +222,10 @@ export async function getAdminDashboard(filters: DashboardFilters) {
   const alerts: string[] = [];
 
   const overdueCount = await prisma.workOrder.count({
-    where: {
-      status: 'IN_PROGRESS',
-      scheduledDate: { lt: new Date() },
-    },
+    where: getOverdueFilter(),
   });
   if (overdueCount > 0) {
-    alerts.push(`${overdueCount} site${overdueCount > 1 ? 's' : ''} have overdue inspections`);
+    alerts.push(`${overdueCount} work order${overdueCount !== 1 ? 's are' : ' is'} overdue for inspection`);
   }
 
   const allContractorAvgs = await prisma.workOrder.groupBy({

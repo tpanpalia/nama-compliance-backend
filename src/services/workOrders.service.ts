@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { Prisma } from '@prisma/client';
 import { prisma } from '../config/database';
 import { toNumberArray, toStringArray } from '../utils/queryFilters';
+import { getOverdueFilter } from '../utils/queryHelpers';
 import { AppError } from '../utils/AppError';
 
 const OVERDUE_THRESHOLD_DAYS = 3;
@@ -69,17 +70,12 @@ const DETAIL_INCLUDE = {
 };
 
 export async function getWorkOrderStats(where: Prisma.WorkOrderWhereInput = {}) {
-  const now = new Date();
-  const overdueCutoff = new Date(now.getTime() - OVERDUE_THRESHOLD_DAYS * 24 * 60 * 60 * 1000);
-
   const [total, completed, wip, overdue] = await Promise.all([
     prisma.workOrder.count({ where }),
     prisma.workOrder.count({ where: { AND: [where, { status: 'INSPECTION_COMPLETED' }] } }),
     prisma.workOrder.count({ where: { AND: [where, { status: 'IN_PROGRESS' }] } }),
     prisma.workOrder.count({
-      where: {
-        AND: [where, { status: 'SUBMITTED', submittedAt: { lt: overdueCutoff } }],
-      },
+      where: getOverdueFilter() as Prisma.WorkOrderWhereInput,
     }),
   ]);
 
