@@ -62,7 +62,12 @@ export function generatePerformanceSummaryPDF(data: PerformanceSummaryData): Pro
       });
     };
     const footer = (pageNum: number) => {
-      const y = PAGE_H - 40;
+      const pageHeight = doc.page.height;
+      const bottomMargin = doc.page.margins.bottom;
+      const footerLineGap = 10;
+      const footerTextHeight = 7;
+      const footerBlockHeight = footerLineGap + footerTextHeight;
+      const y = pageHeight - bottomMargin - footerBlockHeight - 4;
       line(MARGIN, y - 5, PAGE_W - MARGIN, y - 5);
       doc.fontSize(7).fillColor(GRAY_500).font('Helvetica').text(
         'NAMA Water Services - Compliance Inspection System',
