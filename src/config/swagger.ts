@@ -53,7 +53,7 @@ const options: swaggerJSDoc.Options = {
             title: { type: 'string' },
             status: {
               type: 'string',
-              enum: ['PENDING', 'ASSIGNED', 'IN_PROGRESS', 'SUBMITTED', 'INSPECTION_COMPLETED', 'REJECTED'],
+              enum: ['PENDING', 'ASSIGNED', 'IN_PROGRESS', 'SUBMITTED', 'INSPECTION_COMPLETED'],
             },
             priority: { type: 'string', enum: ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'] },
             isLocked: { type: 'boolean' },

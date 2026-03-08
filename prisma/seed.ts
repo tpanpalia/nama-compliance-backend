@@ -93,10 +93,6 @@ const workOrders: WorkOrderSpec[] = [
   { key: 'IC6', date: '2026-02-16', seq: '0019', title: 'Muscat Hills Reservoir Inspection Closeout', status: WorkOrderStatus.INSPECTION_COMPLETED, priority: WorkOrderPriority.LOW, siteCode: 'MUSCAT_HILLS', contractorCode: 'CNT-002', inspectorEmail: 'inspector1@nama.om', scheduledDate: '2026-02-17T08:00:00Z', startedAt: '2026-02-14T08:00:00Z', submittedAt: '2026-02-16T12:40:00Z', approvedAt: '2026-02-16T13:00:00Z' },
   { key: 'IC7', date: '2026-02-14', seq: '0020', title: 'Sur Coastal Reinforcement Final Inspection', status: WorkOrderStatus.INSPECTION_COMPLETED, priority: WorkOrderPriority.HIGH, siteCode: 'SUR', contractorCode: 'CNT-008', inspectorEmail: 'inspector2@nama.om', scheduledDate: '2026-02-15T08:00:00Z', startedAt: '2026-02-12T08:00:00Z', submittedAt: '2026-02-14T10:30:00Z', approvedAt: '2026-02-14T11:00:00Z' },
   { key: 'IC8', date: '2026-02-12', seq: '0021', title: 'Salalah Network Handover Inspection', status: WorkOrderStatus.INSPECTION_COMPLETED, priority: WorkOrderPriority.MEDIUM, siteCode: 'SALALAH', contractorCode: 'CNT-004', inspectorEmail: 'inspector3@nama.om', scheduledDate: '2026-02-13T08:00:00Z', startedAt: '2026-02-10T08:00:00Z', submittedAt: '2026-02-12T11:00:00Z', approvedAt: '2026-02-12T11:45:00Z' },
-  { key: 'R1', date: '2026-02-11', seq: '0022', title: 'Barka Compaction Failure Review', status: WorkOrderStatus.REJECTED, priority: WorkOrderPriority.HIGH, siteCode: 'BARKA', contractorCode: 'CNT-007', inspectorEmail: 'inspector4@nama.om', scheduledDate: '2026-02-12T08:00:00Z', startedAt: '2026-02-09T08:00:00Z', submittedAt: '2026-02-11T14:30:00Z', rejectionReason: 'Backfilling compaction failed density test. Rework required before resubmission.' },
-  { key: 'R2', date: '2026-02-10', seq: '0023', title: 'Sohar Joint Alignment Failure', status: WorkOrderStatus.REJECTED, priority: WorkOrderPriority.CRITICAL, siteCode: 'SOHAR', contractorCode: 'CNT-003', inspectorEmail: 'inspector5@nama.om', scheduledDate: '2026-02-11T08:00:00Z', startedAt: '2026-02-08T08:00:00Z', submittedAt: '2026-02-10T16:20:00Z', rejectionReason: 'Pipe joints misaligned and pressure test results unacceptable.' },
-  { key: 'RO1', date: '2026-02-09', seq: '0024', title: 'Al Khoud Safety Review Rejection', status: WorkOrderStatus.REJECTED, priority: WorkOrderPriority.MEDIUM, siteCode: 'AL_KHOUD', contractorCode: 'CNT-010', inspectorEmail: 'inspector1@nama.om', scheduledDate: '2026-02-10T08:00:00Z', startedAt: '2026-02-07T08:00:00Z', submittedAt: '2026-02-09T12:10:00Z', rejectionReason: 'Safety barricading and PPE compliance gaps require correction before completion.' },
-  { key: 'RO2', date: '2026-02-08', seq: '0025', title: 'Nizwa Bedding Material Rejection Review', status: WorkOrderStatus.REJECTED, priority: WorkOrderPriority.HIGH, siteCode: 'NIZWA', contractorCode: 'CNT-005', inspectorEmail: 'inspector2@nama.om', scheduledDate: '2026-02-09T08:00:00Z', startedAt: '2026-02-06T08:00:00Z', submittedAt: '2026-02-08T11:50:00Z', rejectionReason: 'Bedding material installation does not meet approved standards and must be redone.' },
 ];
 
 const scoreBand = (score: number): ComplianceBand => score >= 90 ? ComplianceBand.EXCELLENT : score >= 70 ? ComplianceBand.GOOD : score >= 50 ? ComplianceBand.FAIR : ComplianceBand.POOR;
@@ -189,7 +185,7 @@ async function main() {
   }
   console.log('? Created 8 sites');
 
-  const template = await prisma.checklistTemplate.create({
+  const template = (await prisma.checklistTemplate.create({
     data: {
       name: 'Nama Standard Inspection Checklist',
       isActive: true,
@@ -197,7 +193,7 @@ async function main() {
       sections: {
         create: [
           { name: 'HSE & Safety', weight: 0.3, order: 1, items: { create: [
-            { text: \"Contractor workers' compliance with wearing PPE\", weight: 10, isRequired: true, order: 1 },
+            { text: "Contractor workers' compliance with wearing PPE", weight: 10, isRequired: true, order: 1 },
             { text: 'Condition of equipment used by the contractor', weight: 10, isRequired: true, order: 2 },
             { text: 'Overall compliance with Nama HSE standards', weight: 10, isRequired: true, order: 3 },
           ] } },
@@ -222,13 +218,16 @@ async function main() {
       },
     },
     include: { sections: { orderBy: { order: 'asc' }, include: { items: { orderBy: { order: 'asc' } } } } },
-  });
+  } as any)) as unknown as {
+    id: string;
+    sections: Array<{ weight: number; name: string; items: Array<{ id: string; order: number; weight: number; text: string }> }>;
+  };
   console.log('? Created 1 checklist template (14 items)');
 
   const itemMap: Record<string, { id: string }> = {};
   for (const section of template.sections) for (const item of section.items) itemMap[`${section.name}:${item.order}`] = { id: item.id };
-  const allItems = template.sections.flatMap((s) => s.items);
-  const sectionDefs = template.sections.map((s) => ({ weight: s.weight, items: s.items.map((i) => i.id) }));
+  const allItems = template.sections.flatMap((s: { items: Array<{ id: string; order: number; weight: number; text: string }> }) => s.items);
+  const sectionDefs = template.sections.map((s: { weight: number; items: Array<{ id: string }> }) => ({ weight: s.weight, items: s.items.map((i: { id: string }) => i.id) }));
   const photos = await uploadPhotos();
 
   const woMap: Record<string, { id: string; contractorId: string | null; inspectorId: string | null; siteCode: string; submittedAt: Date | null }> = {};
@@ -255,7 +254,7 @@ async function main() {
     });
     woMap[spec.key] = { id: wo.id, contractorId: wo.contractorId, inspectorId: wo.inspectorId, siteCode: spec.siteCode, submittedAt: wo.submittedAt };
   }
-  console.log('? Created 25 work orders');
+  console.log(`? Created ${workOrders.length} work orders`);
 
   const completedKeys = ['IC1', 'IC2', 'IC3', 'IC4', 'IC5', 'IC6', 'IC7', 'IC8'];
   for (let wi = 0; wi < completedKeys.length; wi += 1) {
@@ -278,7 +277,13 @@ async function main() {
         },
       });
     }
-    const score = Math.round(sectionDefs.reduce((sum, section) => sum + (section.items.reduce((s, id) => s + ratingPoints(ratingsByItem[id]), 0) / (section.items.length || 1)) * section.weight, 0) * 10) / 10;
+    const score = Math.round(
+      sectionDefs.reduce(
+        (sum: number, section: { weight: number; items: string[] }) =>
+          sum + (section.items.reduce((s: number, id: string) => s + ratingPoints(ratingsByItem[id]), 0) / (section.items.length || 1)) * section.weight,
+        0
+      ) * 10
+    ) / 10;
     await prisma.workOrder.update({ where: { id: wo.id }, data: { overallScore: score, complianceBand: scoreBand(score) } });
   }
   console.log('? Created checklists + responses for 8 WOs');
@@ -350,11 +355,6 @@ async function main() {
         { workOrderId: wo.id, userId: wo.inspectorId, action: 'INSPECTION_COMPLETED', createdAt: dt(spec.approvedAt) ?? new Date() },
       ],
     });
-  }
-  for (const key of ['R1', 'R2', 'RO1', 'RO2']) {
-    const wo = woMap[key];
-    const spec = workOrders.find((entry) => entry.key === key)!;
-    await prisma.auditLog.create({ data: { workOrderId: wo.id, userId: wo.inspectorId, action: 'WORK_ORDER_REJECTED', newValue: { rejectionReason: spec.rejectionReason } as object, createdAt: wo.submittedAt ?? new Date() } });
   }
   console.log('? Created audit logs');
 

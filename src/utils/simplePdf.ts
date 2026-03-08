@@ -474,7 +474,6 @@ export function generateWorkOrderInspectionPdf(params: InspectionPdfPayload): Pr
       IN_PROGRESS: 'WIP at Site',
       SUBMITTED: 'Submitted for Inspection',
       INSPECTION_COMPLETED: 'Inspection Complete',
-      REJECTED: 'Rejected',
     };
 
     doc.moveDown(0.3);

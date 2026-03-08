@@ -1,11 +1,11 @@
 import { prisma } from '../config/database';
+import { ACTIVE_WO_STATUSES, activeProjectsFilter } from '../utils/queryHelpers';
 
 interface DashboardFilters {
   year?: number;
   month?: number;
 }
 
-const ACTIVE_PROJECT_STATUSES = ['ASSIGNED', 'IN_PROGRESS', 'SUBMITTED'] as const;
 const MONTH_LABELS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
 function buildDateRange(filters: DashboardFilters): {
@@ -64,7 +64,7 @@ export async function getAdminDashboard(filters: DashboardFilters) {
     prisma.contractor.count({
       where: {
         isActive: true,
-        workOrders: { some: { status: { in: [...ACTIVE_PROJECT_STATUSES] }, ...currentDateFilter } },
+        workOrders: { some: { status: { in: [...ACTIVE_WO_STATUSES] }, ...currentDateFilter } },
       },
     }),
     prisma.contractor.count({
@@ -72,7 +72,7 @@ export async function getAdminDashboard(filters: DashboardFilters) {
         isActive: true,
         workOrders: {
           some: {
-            status: { in: [...ACTIVE_PROJECT_STATUSES] },
+            status: { in: [...ACTIVE_WO_STATUSES] },
             ...previousDateFilter,
           },
         },
@@ -171,9 +171,7 @@ export async function getAdminDashboard(filters: DashboardFilters) {
       where: { isActive: true },
       include: {
         workOrders: {
-          where: {
-            status: { in: [...ACTIVE_PROJECT_STATUSES] },
-          },
+          where: activeProjectsFilter as any,
           select: { id: true },
         },
       },
@@ -200,7 +198,7 @@ export async function getAdminDashboard(filters: DashboardFilters) {
     scoresByContractor[workOrder.contractorId].push(workOrder.overallScore);
   }
 
-  const topContractors = activeContractorRows
+  const topContractors = (activeContractorRows as unknown as Array<{ id: string; companyName: string; workOrders: Array<{ id: string }> }>)
     .map((contractor) => {
       const scores = scoresByContractor[contractor.id] ?? [];
       const avgScore =

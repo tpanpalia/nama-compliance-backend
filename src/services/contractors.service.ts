@@ -3,6 +3,7 @@ import { Prisma } from '@prisma/client';
 import { z } from 'zod';
 import { prisma } from '../config/database';
 import { toNumberArray, toStringArray } from '../utils/queryFilters';
+import { ACTIVE_WO_STATUSES, activeProjectsFilter } from '../utils/queryHelpers';
 import { AppError } from '../utils/AppError';
 
 export const UpdateContractorSchema = z.object({
@@ -28,8 +29,6 @@ export const CreateContractorSchema = z.object({
 export const UpdateContractorStatusSchema = z.object({
   isActive: z.boolean(),
 });
-
-const ACTIVE_PROJECT_STATUSES = ['ASSIGNED', 'IN_PROGRESS', 'SUBMITTED'] as const;
 
 async function computeComplianceTrend(contractorId: string): Promise<number> {
   const now = new Date();
@@ -74,7 +73,7 @@ export async function enrichContractor(contractor: {
     prisma.workOrder.count({
       where: {
         contractorId: contractor.id,
-        status: { in: [...ACTIVE_PROJECT_STATUSES] },
+        status: { in: [...ACTIVE_WO_STATUSES] },
       },
     }),
     prisma.workOrder.count({
@@ -234,7 +233,7 @@ export async function listContractors(filters: {
   const [totalAll, activeProjectsTotal] = await Promise.all([
     prisma.contractor.count(),
     prisma.workOrder.count({
-      where: { status: { in: [...ACTIVE_PROJECT_STATUSES] } },
+      where: activeProjectsFilter as Prisma.WorkOrderWhereInput,
     }),
   ]);
 

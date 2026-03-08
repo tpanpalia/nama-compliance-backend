@@ -104,6 +104,7 @@ export async function listWorkOrders(filters: {
   const months = toNumberArray(month);
 
   const where: Prisma.WorkOrderWhereInput = {};
+  const andClauses: Prisma.WorkOrderWhereInput[] = [{ status: { not: 'REJECTED' as any } }];
 
   if (role === 'CONTRACTOR') {
     if (!contractorDbId) throw new AppError('Forbidden', 403, 'FORBIDDEN');
@@ -135,7 +136,8 @@ export async function listWorkOrders(filters: {
   }
 
   if (statuses.length) {
-    where.status = { in: statuses as any };
+    const filteredStatuses = statuses.filter((value) => value !== 'REJECTED');
+    where.status = { in: filteredStatuses as any };
   }
 
   const dateClauses: Prisma.WorkOrderWhereInput[] = [];
@@ -174,8 +176,9 @@ export async function listWorkOrders(filters: {
   }
 
   if (dateClauses.length) {
-    where.AND = [...((where.AND as Prisma.WorkOrderWhereInput[]) ?? []), ...dateClauses];
+    andClauses.push(...dateClauses);
   }
+  where.AND = [...((where.AND as Prisma.WorkOrderWhereInput[]) ?? []), ...andClauses];
 
   const [workOrders, total] = await prisma.$transaction([
     prisma.workOrder.findMany({
@@ -219,6 +222,7 @@ export async function getWorkOrderById(
     include: DETAIL_INCLUDE,
   });
   if (!wo) throw new AppError('Work order not found', 404);
+  if (wo.status === 'REJECTED') throw new AppError('Work order not found', 404);
 
   const locationFlaggedCount = await prisma.evidence.count({
     where: {
@@ -318,6 +322,9 @@ export async function getWorkOrderChecklistDetail(id: string) {
   if (!workOrder) {
     throw new AppError('Work order not found', 404, 'NOT_FOUND');
   }
+  if (workOrder.status === 'REJECTED') {
+    throw new AppError('Work order not found', 404, 'NOT_FOUND');
+  }
 
   const template = await prisma.checklistTemplate.findFirst({
     where: { isActive: true },
@@ -406,7 +413,6 @@ export async function getWorkOrderChecklistDetail(id: string) {
     IN_PROGRESS: 'WIP at Site',
     SUBMITTED: 'Submitted for Inspection',
     INSPECTION_COMPLETED: 'Inspection Complete',
-    REJECTED: 'Rejected',
   };
 
   return {
