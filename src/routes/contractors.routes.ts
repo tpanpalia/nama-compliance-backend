@@ -11,6 +11,39 @@ const router = Router();
 /**
  * @swagger
  * /api/v1/contractors:
+ *   post:
+ *     summary: Create contractor (ADMIN only)
+ *     tags: [Contractors]
+ *     security:
+ *       - BearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [contractorId, companyName, tradeLicense, crNumber, contactName, email, phone]
+ *             properties:
+ *               contractorId: { type: string }
+ *               companyName: { type: string }
+ *               tradeLicense: { type: string }
+ *               crNumber: { type: string }
+ *               contactName: { type: string }
+ *               email: { type: string, format: email }
+ *               phone: { type: string }
+ *               address: { type: string }
+ *               regions:
+ *                 type: array
+ *                 items: { type: string }
+ *     responses:
+ *       201:
+ *         description: Contractor created
+ */
+router.post('/', authorize(UserRole.ADMIN), contractorsController.create);
+
+/**
+ * @swagger
+ * /api/v1/contractors:
  *   get:
  *     summary: List contractors with computed stats (ADMIN and REGULATOR)
  *     tags: [Contractors]

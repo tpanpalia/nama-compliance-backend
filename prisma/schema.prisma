@@ -37,6 +37,7 @@ model Contractor {
   contactName   String
   phone         String
   address       String?
+  regions       String[]       @default([])
   isActive      Boolean        @default(true)
   createdAt     DateTime       @default(now()) @db.Timestamptz(6)
   updatedAt     DateTime       @default(now()) @updatedAt @db.Timestamptz(6)

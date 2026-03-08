@@ -51,6 +51,13 @@ type InspectionTemplateSection = {
   items: InspectionTemplateItem[];
 };
 
+type InspectionSectionScore = {
+  name: string;
+  score: number;
+  rated: number;
+  total: number;
+};
+
 type InspectionPdfPayload = {
   workOrder: {
     reference: string;
@@ -76,6 +83,13 @@ type InspectionPdfPayload = {
   } | null;
   evidenceByItem: Record<string, { contractor: InspectionEvidence[]; inspector: InspectionEvidence[] }>;
   responseByItem: Record<string, InspectionResponse | undefined>;
+  summary: {
+    total: number;
+    compliant: number;
+    partial: number;
+    nonCompliant: number;
+  };
+  sectionScores: InspectionSectionScore[];
 };
 
 function formatDate(value?: string | null): string {
@@ -299,6 +313,7 @@ export function generateWorkOrderInspectionPdf(params: InspectionPdfPayload): Pr
     const LIGHT_BG = '#F0F9FA';
     const TEXT_DARK = '#111827';
     const TEXT_GREY = '#6B7280';
+    const TEAL_LIGHT = '#E6F4F5';
 
     const drawPageHeader = () => {
       doc.save();
@@ -319,15 +334,130 @@ export function generateWorkOrderInspectionPdf(params: InspectionPdfPayload): Pr
         .text('Compliance Inspection Report', 40, 38, {
           align: 'center',
           width: doc.page.width - 80,
-        });
+      });
       doc.y = 75;
     };
 
-    const ensureInspectionPageSpace = (requiredHeight = 50) => {
-      if (doc.y + requiredHeight > 720) {
+    const PAGE_BOTTOM = doc.page.height - 60;
+
+    const checkPageBreak = (neededHeight = 60) => {
+      if (doc.y + neededHeight > PAGE_BOTTOM) {
         doc.addPage();
         drawPageHeader();
       }
+    };
+
+    const drawStatistics = () => {
+      checkPageBreak(240);
+
+      doc
+        .fontSize(12)
+        .fillColor(PRIMARY)
+        .font('Helvetica-Bold')
+        .text('Inspection Summary', 40);
+
+      doc.moveDown(0.5);
+
+      const stats = [
+        { label: 'Total Items', value: String(params.summary.total), color: PRIMARY, bg: TEAL_LIGHT },
+        { label: 'Compliant', value: String(params.summary.compliant), color: '#059669', bg: '#ECFDF5' },
+        { label: 'Partial', value: String(params.summary.partial), color: '#D97706', bg: '#FFFBEB' },
+        { label: 'Non-Compliant', value: String(params.summary.nonCompliant), color: '#DC2626', bg: '#FEF2F2' },
+      ];
+
+      const boxW = 118;
+      const boxH = 52;
+      const startX = 40;
+      const startY = doc.y;
+      const gap = 9;
+
+      stats.forEach((stat, index) => {
+        const x = startX + index * (boxW + gap);
+        doc.save();
+        doc.rect(x, startY, boxW, boxH).fillAndStroke(stat.bg, '#E5E7EB');
+        doc.restore();
+        doc
+          .fontSize(20)
+          .fillColor(stat.color)
+          .font('Helvetica-Bold')
+          .text(stat.value, x, startY + 7, { width: boxW, align: 'center' });
+        doc
+          .fontSize(7.5)
+          .fillColor(TEXT_GREY)
+          .font('Helvetica')
+          .text(stat.label, x, startY + 33, { width: boxW, align: 'center' });
+      });
+
+      doc.y = startY + boxH + 14;
+
+      if (workOrder.overallScore != null) {
+        checkPageBreak(45);
+        const score = workOrder.overallScore;
+        const band = score >= 90 ? 'EXCELLENT' : score >= 75 ? 'GOOD' : score >= 60 ? 'FAIR' : 'POOR';
+        const bandColor =
+          band === 'EXCELLENT' ? '#059669' : band === 'GOOD' ? '#02474E' : band === 'FAIR' ? '#D97706' : '#DC2626';
+
+        const bannerY = doc.y;
+        doc.save();
+        doc.rect(40, bannerY, 515, 36).fill(bandColor);
+        doc.restore();
+        doc
+          .fontSize(12)
+          .fillColor('#ffffff')
+          .font('Helvetica-Bold')
+          .text(`Overall Compliance Score: ${score.toFixed(1)}%   -   ${band}`, 40, bannerY + 11, {
+            width: 515,
+            align: 'center',
+          });
+        doc.y = bannerY + 50;
+      }
+
+      doc.moveDown(1);
+      checkPageBreak(30 + params.sectionScores.length * 32);
+      doc
+        .fontSize(10)
+        .fillColor(PRIMARY)
+        .font('Helvetica-Bold')
+        .text('Compliance by Section');
+
+      doc.moveDown(0.4);
+
+      const chartX = 40;
+      const labelW = 155;
+      const trackW = 290;
+      const barH = 18;
+      const barGap = 10;
+
+      for (const section of params.sectionScores ?? []) {
+        checkPageBreak(barH + barGap + 5);
+        const rowY = doc.y;
+        const score = section.score ?? 0;
+        const filled = (score / 100) * trackW;
+        const barColor = score >= 90 ? '#059669' : score >= 75 ? '#02474E' : score >= 60 ? '#D97706' : '#DC2626';
+
+        doc
+          .fontSize(8)
+          .fillColor('#374151')
+          .font('Helvetica')
+          .text(section.name, chartX, rowY + 6, { width: labelW, ellipsis: true });
+
+        doc.save();
+        doc.rect(chartX + labelW, rowY, trackW, barH).fill('#F3F4F6');
+        if (filled > 0) {
+          doc.rect(chartX + labelW, rowY, filled, barH).fill(barColor);
+        }
+        doc.restore();
+
+        doc
+          .fontSize(8)
+          .fillColor('#111827')
+          .font('Helvetica-Bold')
+          .text(`${score.toFixed(1)}%`, chartX + labelW + trackW + 8, rowY + 5);
+
+        doc.y = rowY + barH + barGap;
+      }
+
+      doc.moveDown(1);
     };
 
     drawPageHeader();
@@ -378,46 +508,52 @@ export function generateWorkOrderInspectionPdf(params: InspectionPdfPayload): Pr
     doc.moveTo(40, doc.y).lineTo(555, doc.y).strokeColor(PRIMARY).lineWidth(1.5).stroke();
     doc.moveDown(0.5);
 
+    checkPageBreak(80);
     const infoY = doc.y;
+    const colStartY = infoY;
     doc
       .fontSize(9)
       .fillColor(PRIMARY)
       .font('Helvetica-Bold')
-      .text('Contractor Information', 40, infoY);
+      .text('Contractor Information', 40, colStartY);
     doc
       .fontSize(9)
       .fillColor(TEXT_DARK)
       .font('Helvetica-Bold')
-      .text(workOrder.contractor?.companyName ?? '-', 40, infoY + 14);
+      .text(workOrder.contractor?.companyName ?? '-', 40, colStartY + 14, { width: 220 });
     doc
       .fontSize(8)
       .fillColor(TEXT_GREY)
       .font('Helvetica')
-      .text(`CR: ${workOrder.contractor?.crNumber ?? '-'}`, 40, infoY + 26);
+      .text(`CR: ${workOrder.contractor?.crNumber ?? '-'}`, 40, colStartY + 26, { width: 220 });
+    const leftY = doc.y;
 
     doc
       .fontSize(9)
       .fillColor(PRIMARY)
       .font('Helvetica-Bold')
-      .text('Assigned Inspector', 300, infoY);
+      .text('Assigned Inspector', 300, colStartY);
     doc
       .fontSize(9)
       .fillColor(TEXT_DARK)
       .font('Helvetica-Bold')
-      .text(workOrder.inspector?.displayName ?? 'Not Assigned', 300, infoY + 14);
+      .text(workOrder.inspector?.displayName ?? 'Not Assigned', 300, colStartY + 14, { width: 220 });
     doc
       .fontSize(8)
       .fillColor(TEXT_GREY)
       .font('Helvetica')
-      .text(workOrder.inspector?.isActive ? 'Status: Active' : 'Status: -', 300, infoY + 26);
+      .text(workOrder.inspector?.isActive ? 'Status: Active' : 'Status: -', 300, colStartY + 26, { width: 220 });
+    const rightY = doc.y;
 
-    doc.y = infoY + 50;
+    doc.y = Math.max(leftY, rightY) + 10;
     doc.moveDown(0.5);
     doc.moveTo(40, doc.y).lineTo(555, doc.y).strokeColor('#E5E7EB').lineWidth(0.5).stroke();
     doc.moveDown(0.8);
 
+    drawStatistics();
+
     for (const section of template?.sections ?? []) {
-      ensureInspectionPageSpace(40);
+      checkPageBreak(46);
 
       doc.save();
       doc.rect(40, doc.y, 515, 22).fill(LIGHT_BG);
@@ -439,7 +575,7 @@ export function generateWorkOrderInspectionPdf(params: InspectionPdfPayload): Pr
       doc.y += 26;
 
       for (const item of section.items) {
-        ensureInspectionPageSpace(58);
+        checkPageBreak(86);
 
         const evidence = evidenceByItem[item.id] ?? { contractor: [], inspector: [] };
         const response = responseByItem[item.id] ?? null;
@@ -472,6 +608,7 @@ export function generateWorkOrderInspectionPdf(params: InspectionPdfPayload): Pr
             { width: 220 }
           );
         }
+        const leftColumnEndY = doc.y;
 
         doc
           .fontSize(8)
@@ -497,8 +634,9 @@ export function generateWorkOrderInspectionPdf(params: InspectionPdfPayload): Pr
             ellipsis: true,
           });
         }
+        const rightColumnEndY = doc.y;
 
-        doc.y = colY + 45;
+        doc.y = Math.max(leftColumnEndY, rightColumnEndY) + 10;
         doc.moveTo(44, doc.y).lineTo(551, doc.y).strokeColor('#F3F4F6').lineWidth(0.5).stroke();
         doc.moveDown(0.5);
       }

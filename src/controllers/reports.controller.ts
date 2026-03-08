@@ -144,6 +144,7 @@ export const generateReport = async (req: Request, res: Response, next: NextFunc
     const reportType = String(req.body.reportType ?? req.body.type ?? '');
     const workOrderId = req.body.workOrderId as string | undefined;
     const contractorIds = toArray<string>(req.body.contractorId).filter(Boolean);
+    const regions = toArray<string>(req.body.regions).filter(Boolean);
     const years = toArray<number | string>(req.body.year)
       .map((value) => Number(value))
       .filter((value) => !Number.isNaN(value));
@@ -224,6 +225,31 @@ export const generateReport = async (req: Request, res: Response, next: NextFunc
         responseByItem[response.itemId] = response;
       }
 
+      const responses = workOrderChecklist?.responses ?? [];
+      const ratingScore: Record<string, number> = {
+        COMPLIANT: 100,
+        PARTIAL: 60,
+        NON_COMPLIANT: 0,
+      };
+
+      const sectionScores =
+        template?.sections.map((section) => {
+          const itemIds = section.items.map((item) => item.id);
+          const sectionResponses = responses.filter((response) => itemIds.includes(response.itemId));
+          const scored = sectionResponses.filter((response) => response.rating != null);
+          const avg =
+            scored.length > 0
+              ? scored.reduce((sum, response) => sum + (ratingScore[response.rating as string] ?? 0), 0) / scored.length
+              : 0;
+
+          return {
+            name: section.name,
+            score: avg,
+            rated: scored.length,
+            total: itemIds.length,
+          };
+        }) ?? [];
+
       const pdfBuffer = await generateWorkOrderInspectionPdf({
         workOrder: {
           reference: workOrder.reference,
@@ -263,6 +289,13 @@ export const generateReport = async (req: Request, res: Response, next: NextFunc
           : null,
         evidenceByItem,
         responseByItem,
+        summary: {
+          total: responses.length,
+          compliant: responses.filter((response) => response.rating === 'COMPLIANT').length,
+          partial: responses.filter((response) => response.rating === 'PARTIAL').length,
+          nonCompliant: responses.filter((response) => response.rating === 'NON_COMPLIANT').length,
+        },
+        sectionScores,
       });
 
       const subject = workOrder.site.name;
@@ -305,15 +338,15 @@ export const generateReport = async (req: Request, res: Response, next: NextFunc
 
     switch (reportType) {
       case 'contractor-performance': {
-        const result = await ReportsService.generateContractorPerformanceReport(contractorIds, years, months);
+        const result = await ReportsService.generateContractorPerformanceReport(contractorIds, years, months, regions);
         reportData = result.data;
-        contractors = result.contractors;
+        contractors = result.contractors as unknown as Array<{ companyName: string }>;
         break;
       }
       case 'performance-summary': {
-        const result = await ReportsService.generatePerformanceSummaryReport(contractorIds, years, months);
+        const result = await ReportsService.generatePerformanceSummaryReport(contractorIds, years, months, regions);
         reportData = result.data;
-        contractors = result.contractors;
+        contractors = result.contractors as unknown as Array<{ companyName: string }>;
         break;
       }
       default:
@@ -348,6 +381,7 @@ export const generateReport = async (req: Request, res: Response, next: NextFunc
             filters: {
               reportType,
               contractorIds,
+              regions,
               years,
               months,
             },

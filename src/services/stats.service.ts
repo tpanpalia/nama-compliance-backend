@@ -5,6 +5,9 @@ interface DashboardFilters {
   month?: number;
 }
 
+const ACTIVE_PROJECT_STATUSES = ['ASSIGNED', 'IN_PROGRESS', 'SUBMITTED'] as const;
+const MONTH_LABELS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
 function buildDateRange(filters: DashboardFilters): {
   current: { gte: Date; lte: Date };
   previous: { gte: Date; lte: Date };
@@ -43,13 +46,16 @@ function computeTrend(current: number, previous: number): number {
 
 export async function getAdminDashboard(filters: DashboardFilters) {
   const { current, previous } = buildDateRange(filters);
+  const currentDateFilter = { createdAt: current };
+  const previousDateFilter = { createdAt: previous };
+  const year = filters.year || new Date().getFullYear();
 
   const [currentInspections, previousInspections] = await Promise.all([
     prisma.workOrder.count({
-      where: { status: { in: ['SUBMITTED', 'INSPECTION_COMPLETED'] }, createdAt: current },
+      where: { status: 'INSPECTION_COMPLETED', ...currentDateFilter },
     }),
     prisma.workOrder.count({
-      where: { status: { in: ['SUBMITTED', 'INSPECTION_COMPLETED'] }, createdAt: previous },
+      where: { status: 'INSPECTION_COMPLETED', ...previousDateFilter },
     }),
   ]);
   const inspectionTrend = computeTrend(currentInspections, previousInspections);
@@ -58,7 +64,7 @@ export async function getAdminDashboard(filters: DashboardFilters) {
     prisma.contractor.count({
       where: {
         isActive: true,
-        workOrders: { some: { status: { in: ['ASSIGNED', 'IN_PROGRESS'] } } },
+        workOrders: { some: { status: { in: [...ACTIVE_PROJECT_STATUSES] }, ...currentDateFilter } },
       },
     }),
     prisma.contractor.count({
@@ -66,8 +72,8 @@ export async function getAdminDashboard(filters: DashboardFilters) {
         isActive: true,
         workOrders: {
           some: {
-            status: { in: ['ASSIGNED', 'IN_PROGRESS', 'SUBMITTED', 'INSPECTION_COMPLETED'] },
-            createdAt: previous,
+            status: { in: [...ACTIVE_PROJECT_STATUSES] },
+            ...previousDateFilter,
           },
         },
       },
@@ -97,21 +103,32 @@ export async function getAdminDashboard(filters: DashboardFilters) {
   const prevAvgCompliance = Math.round((previousAvg._avg.overallScore || 0) * 10) / 10;
   const complianceTrend = Math.round((avgCompliance - prevAvgCompliance) * 10) / 10;
 
-  const monthlyTrend = await prisma.$queryRaw<Array<{ month: string; inspectionCount: number; avgCompliance: number }>>`
+  const rawMonthlyTrend = await prisma.$queryRaw<Array<{ month: number; inspections: number; avgCompliance: number | null }>>`
     SELECT
-      TO_CHAR(DATE_TRUNC('month', "createdAt"), 'Mon') as month,
-      DATE_TRUNC('month', "createdAt")                 as "monthDate",
-      COUNT(*)::int                                     as "inspectionCount",
+      EXTRACT(MONTH FROM "approvedAt")::int            as month,
+      COUNT(*)::int                                    as inspections,
       ROUND(AVG(
         CASE WHEN "overallScore" IS NOT NULL THEN "overallScore" ELSE NULL END
-      )::numeric, 1)::float                            as "avgCompliance"
+      )::numeric, 1)::float                           as "avgCompliance"
     FROM "WorkOrder"
     WHERE
-      "createdAt" >= NOW() - INTERVAL '6 months'
-      AND status IN ('SUBMITTED', 'INSPECTION_COMPLETED')
-    GROUP BY DATE_TRUNC('month', "createdAt")
-    ORDER BY DATE_TRUNC('month', "createdAt") ASC
+      status = 'INSPECTION_COMPLETED'
+      AND "approvedAt" >= ${new Date(year, 0, 1)}
+      AND "approvedAt" <= ${new Date(year, 11, 31, 23, 59, 59)}
+    GROUP BY EXTRACT(MONTH FROM "approvedAt")
+    ORDER BY EXTRACT(MONTH FROM "approvedAt") ASC
   `;
+
+  const monthlyTrend = Array.from({ length: 12 }, (_, index) => {
+    const month = index + 1;
+    const found = rawMonthlyTrend.find((entry) => entry.month === month);
+    return {
+      month,
+      monthLabel: MONTH_LABELS[index],
+      inspections: found?.inspections ?? 0,
+      avgCompliance: found?.avgCompliance ?? null,
+    };
+  });
 
   const categoryData = await prisma.$queryRaw<Array<{ sectionName: string; avgScore: number }>>`
     SELECT
@@ -149,60 +166,60 @@ export async function getAdminDashboard(filters: DashboardFilters) {
     take: 4,
   });
 
-  const topContractors = await prisma.$queryRaw<
-    Array<{ id: string; companyName: string; avgScore: number; activeProjects: number; trend: number }>
-  >`
-    WITH contractor_scores AS (
-      SELECT
-        c.id,
-        c."companyName",
-        ROUND(AVG(wo."overallScore")::numeric, 1)::float as "avgScore",
-        COUNT(CASE WHEN wo.status IN ('ASSIGNED', 'IN_PROGRESS')
-                   THEN 1 END)::int                       as "activeProjects"
-      FROM "Contractor" c
-      JOIN "WorkOrder"  wo ON wo."contractorId" = c.id
-      WHERE
-        wo."overallScore" IS NOT NULL
-        AND c."isActive" = true
-      GROUP BY c.id, c."companyName"
-      HAVING COUNT(wo.id) >= 1
-    ),
-    current_scores AS (
-      SELECT
-        c.id,
-        ROUND(AVG(wo."overallScore")::numeric, 1)::float as "currentAvg"
-      FROM "Contractor" c
-      JOIN "WorkOrder"  wo ON wo."contractorId" = c.id
-      WHERE
-        wo."overallScore" IS NOT NULL
-        AND wo."approvedAt" >= NOW() - INTERVAL '1 month'
-      GROUP BY c.id
-    ),
-    previous_scores AS (
-      SELECT
-        c.id,
-        ROUND(AVG(wo."overallScore")::numeric, 1)::float as "previousAvg"
-      FROM "Contractor" c
-      JOIN "WorkOrder"  wo ON wo."contractorId" = c.id
-      WHERE
-        wo."overallScore" IS NOT NULL
-        AND wo."approvedAt" >= NOW() - INTERVAL '2 months'
-        AND wo."approvedAt" <  NOW() - INTERVAL '1 month'
-      GROUP BY c.id
-    )
-    SELECT
-      cs.id,
-      cs."companyName",
-      cs."avgScore",
-      cs."activeProjects",
-      ROUND((COALESCE(cur."currentAvg", cs."avgScore") -
-             COALESCE(prev."previousAvg", cs."avgScore"))::numeric, 1)::float as trend
-    FROM contractor_scores cs
-    LEFT JOIN current_scores  cur  ON cur.id  = cs.id
-    LEFT JOIN previous_scores prev ON prev.id = cs.id
-    ORDER BY cs."avgScore" DESC
-    LIMIT 4
-  `;
+  const [activeContractorRows, completedWOs] = await Promise.all([
+    prisma.contractor.findMany({
+      where: { isActive: true },
+      include: {
+        workOrders: {
+          where: {
+            status: { in: [...ACTIVE_PROJECT_STATUSES] },
+          },
+          select: { id: true },
+        },
+      },
+    }),
+    prisma.workOrder.findMany({
+      where: {
+        status: 'INSPECTION_COMPLETED',
+        overallScore: { not: null },
+        approvedAt: current,
+      },
+      select: {
+        contractorId: true,
+        overallScore: true,
+      },
+    }),
+  ]);
+
+  const scoresByContractor: Record<string, number[]> = {};
+  for (const workOrder of completedWOs) {
+    if (!workOrder.contractorId || workOrder.overallScore == null) continue;
+    if (!scoresByContractor[workOrder.contractorId]) {
+      scoresByContractor[workOrder.contractorId] = [];
+    }
+    scoresByContractor[workOrder.contractorId].push(workOrder.overallScore);
+  }
+
+  const topContractors = activeContractorRows
+    .map((contractor) => {
+      const scores = scoresByContractor[contractor.id] ?? [];
+      const avgScore =
+        scores.length > 0 ? Math.round((scores.reduce((sum, score) => sum + score, 0) / scores.length) * 10) / 10 : null;
+
+      return {
+        id: contractor.id,
+        companyName: contractor.companyName,
+        activeProjects: contractor.workOrders.length,
+        avgScore,
+      };
+    })
+    .filter((contractor) => contractor.avgScore != null)
+    .sort((a, b) => (b.avgScore ?? 0) - (a.avgScore ?? 0))
+    .slice(0, 5)
+    .map((contractor) => ({
+      ...contractor,
+      trend: 0,
+    }));
 
   const alerts: string[] = [];
 

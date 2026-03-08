@@ -53,7 +53,7 @@ const options: swaggerJSDoc.Options = {
             title: { type: 'string' },
             status: {
               type: 'string',
-              enum: ['PENDING', 'ASSIGNED', 'IN_PROGRESS', 'SUBMITTED', 'INSPECTION_COMPLETED', 'REJECTED', 'REOPENED'],
+              enum: ['PENDING', 'ASSIGNED', 'IN_PROGRESS', 'SUBMITTED', 'INSPECTION_COMPLETED', 'REJECTED'],
             },
             priority: { type: 'string', enum: ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'] },
             isLocked: { type: 'boolean' },
@@ -69,6 +69,7 @@ const options: swaggerJSDoc.Options = {
             contractorId: { type: 'string', example: 'C-00001' },
             companyName: { type: 'string' },
             email: { type: 'string' },
+            regions: { type: 'array', items: { type: 'string' } },
             isActive: { type: 'boolean' },
           },
         },

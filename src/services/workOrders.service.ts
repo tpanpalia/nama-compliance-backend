@@ -68,18 +68,17 @@ const DETAIL_INCLUDE = {
   evidence: true,
 };
 
-export async function getWorkOrderStats() {
+export async function getWorkOrderStats(where: Prisma.WorkOrderWhereInput = {}) {
   const now = new Date();
   const overdueCutoff = new Date(now.getTime() - OVERDUE_THRESHOLD_DAYS * 24 * 60 * 60 * 1000);
 
   const [total, completed, wip, overdue] = await Promise.all([
-    prisma.workOrder.count(),
-    prisma.workOrder.count({ where: { status: 'INSPECTION_COMPLETED' } }),
-    prisma.workOrder.count({ where: { status: 'IN_PROGRESS' } }),
+    prisma.workOrder.count({ where }),
+    prisma.workOrder.count({ where: { AND: [where, { status: 'INSPECTION_COMPLETED' }] } }),
+    prisma.workOrder.count({ where: { AND: [where, { status: 'IN_PROGRESS' }] } }),
     prisma.workOrder.count({
       where: {
-        status: 'SUBMITTED',
-        submittedAt: { lt: overdueCutoff },
+        AND: [where, { status: 'SUBMITTED', submittedAt: { lt: overdueCutoff } }],
       },
     }),
   ]);
@@ -189,7 +188,7 @@ export async function listWorkOrders(filters: {
     prisma.workOrder.count({ where }),
   ]);
 
-  const stats = await getWorkOrderStats();
+  const stats = await getWorkOrderStats(where);
 
   return {
     data: workOrders.map((wo) => ({
@@ -408,7 +407,6 @@ export async function getWorkOrderChecklistDetail(id: string) {
     SUBMITTED: 'Submitted for Inspection',
     INSPECTION_COMPLETED: 'Inspection Complete',
     REJECTED: 'Rejected',
-    REOPENED: 'Reopened',
   };
 
   return {

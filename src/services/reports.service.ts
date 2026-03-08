@@ -531,20 +531,41 @@ export async function getSystemSummaryReportData(year?: number, month?: number) 
   };
 }
 
-export async function generateContractorPerformanceReport(contractorIds: string[], years: number[], months: number[]) {
-  const contractors = contractorIds.length
-    ? await prisma.contractor.findMany({
-        where: { id: { in: contractorIds } },
-        select: { id: true, companyName: true, contractorId: true, crNumber: true },
-      })
-    : [];
+export async function generateContractorPerformanceReport(contractorIds: string[], years: number[], months: number[], regions: string[]) {
+  const contractors =
+    contractorIds.length || regions.length
+      ? await prisma.contractor.findMany({
+          where: {
+            ...(contractorIds.length ? { id: { in: contractorIds } } : {}),
+            ...(regions.length ? { regions: { hasSome: regions } } : {}),
+          } as any,
+          select: { id: true, companyName: true, contractorId: true, crNumber: true, regions: true } as any,
+        })
+      : [];
 
   const statuses: WorkOrderStatus[] = ['SUBMITTED', 'INSPECTION_COMPLETED'];
+  const contractorFilter =
+    contractorIds.length > 0 && regions.length > 0
+      ? {
+          contractor: {
+            id: { in: contractorIds },
+            regions: { hasSome: regions },
+          },
+        }
+      : contractorIds.length > 0
+        ? { contractorId: { in: contractorIds } }
+        : regions.length > 0
+          ? {
+              contractor: {
+                regions: { hasSome: regions },
+              },
+            }
+          : {};
   const where = {
-    ...(contractorIds.length > 0 ? { contractorId: { in: contractorIds } } : {}),
+    ...contractorFilter,
     ...buildDateFilter(years, months),
     status: { in: statuses },
-  };
+  } as any;
 
   const workOrders = (await prisma.workOrder.findMany({
     where,
@@ -634,7 +655,7 @@ export async function generateContractorPerformanceReport(contractorIds: string[
     data: {
       reportType: 'CONTRACTOR_PERFORMANCE',
       generatedAt: new Date().toISOString(),
-      filters: { contractorIds, years, months },
+      filters: { contractorIds, years, months, regions },
       summary,
       workOrders: workOrders.map((workOrder) => ({
         id: workOrder.id,
@@ -672,18 +693,40 @@ export async function generateContractorPerformanceReport(contractorIds: string[
   };
 }
 
-export async function generatePerformanceSummaryReport(contractorIds: string[], years: number[], months: number[]) {
-  const contractors = contractorIds.length
-    ? await prisma.contractor.findMany({
-        where: { id: { in: contractorIds } },
-        select: { id: true, companyName: true },
-      })
-    : [];
+export async function generatePerformanceSummaryReport(contractorIds: string[], years: number[], months: number[], regions: string[]) {
+  const contractors =
+    contractorIds.length || regions.length
+      ? await prisma.contractor.findMany({
+          where: {
+            ...(contractorIds.length ? { id: { in: contractorIds } } : {}),
+            ...(regions.length ? { regions: { hasSome: regions } } : {}),
+          } as any,
+          select: { id: true, companyName: true, regions: true } as any,
+        })
+      : [];
+
+  const contractorFilter =
+    contractorIds.length > 0 && regions.length > 0
+      ? {
+          contractor: {
+            id: { in: contractorIds },
+            regions: { hasSome: regions },
+          },
+        }
+      : contractorIds.length > 0
+        ? { contractorId: { in: contractorIds } }
+        : regions.length > 0
+          ? {
+              contractor: {
+                regions: { hasSome: regions },
+              },
+            }
+          : {};
 
   const summaryWhere = {
-    ...(contractorIds.length > 0 ? { contractorId: { in: contractorIds } } : {}),
+    ...contractorFilter,
     ...buildDateFilter(years, months),
-  };
+  } as any;
 
   const contractorStats = await prisma.workOrder.groupBy({
     by: ['contractorId'],
@@ -709,7 +752,7 @@ export async function generatePerformanceSummaryReport(contractorIds: string[], 
     data: {
       reportType: 'PERFORMANCE_SUMMARY',
       generatedAt: new Date().toISOString(),
-      filters: { contractorIds, years, months },
+      filters: { contractorIds, years, months, regions },
       contractors: contractorStats.map((row) => {
         const meta = row.contractorId ? contractorMetaMap.get(row.contractorId) : null;
         return {

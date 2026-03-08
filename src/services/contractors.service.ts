@@ -10,13 +10,26 @@ export const UpdateContractorSchema = z.object({
   email: z.string().email().optional(),
   phone: z.string().min(8).optional(),
   address: z.string().optional(),
+  regions: z.array(z.string()).optional(),
+});
+
+export const CreateContractorSchema = z.object({
+  contractorId: z.string().min(3),
+  companyName: z.string().min(2),
+  tradeLicense: z.string().min(2),
+  crNumber: z.string().min(2),
+  contactName: z.string().min(2),
+  email: z.string().email(),
+  phone: z.string().min(8),
+  address: z.string().optional(),
+  regions: z.array(z.string()).optional(),
 });
 
 export const UpdateContractorStatusSchema = z.object({
   isActive: z.boolean(),
 });
 
-void bcrypt;
+const ACTIVE_PROJECT_STATUSES = ['ASSIGNED', 'IN_PROGRESS', 'SUBMITTED'] as const;
 
 async function computeComplianceTrend(contractorId: string): Promise<number> {
   const now = new Date();
@@ -54,13 +67,19 @@ export async function enrichContractor(contractor: {
   id: string;
   isActive: boolean;
   companyName?: string;
+  totalWorkOrders?: number;
   [key: string]: unknown;
 }) {
-  const [activeProjects, avgResult, trend] = await Promise.all([
+  const [activeProjects, totalWorkOrders, avgResult, trend] = await Promise.all([
     prisma.workOrder.count({
       where: {
         contractorId: contractor.id,
-        status: { in: ['ASSIGNED', 'IN_PROGRESS'] },
+        status: { in: [...ACTIVE_PROJECT_STATUSES] },
+      },
+    }),
+    prisma.workOrder.count({
+      where: {
+        contractorId: contractor.id,
       },
     }),
     prisma.workOrder.aggregate({
@@ -88,6 +107,7 @@ export async function enrichContractor(contractor: {
   return {
     ...contractor,
     activeProjects,
+    totalWorkOrders,
     avgCompliance,
     complianceTrend: trend,
     displayStatus,
@@ -186,16 +206,21 @@ export async function listContractors(filters: {
         identity: { select: { email: true } },
         phone: true,
         address: true,
+        regions: true,
         contactName: true,
         crNumber: true,
         isActive: true,
         createdAt: true,
-      },
+      } as any,
     }),
     prisma.contractor.count({ where }),
   ]);
 
-  const enriched = await Promise.all(contractors.map(enrichContractor));
+  const enriched = await Promise.all(
+    (contractors as unknown as Array<{ id: string; isActive: boolean; companyName?: string; totalWorkOrders?: number }>).map(
+      enrichContractor
+    )
+  );
 
   if (sortBy) {
     const dir = sortDir === 'asc' ? 1 : -1;
@@ -209,7 +234,7 @@ export async function listContractors(filters: {
   const [totalAll, activeProjectsTotal] = await Promise.all([
     prisma.contractor.count(),
     prisma.workOrder.count({
-      where: { status: { in: ['ASSIGNED', 'IN_PROGRESS'] } },
+      where: { status: { in: [...ACTIVE_PROJECT_STATUSES] } },
     }),
   ]);
 
@@ -243,11 +268,12 @@ export async function getContractorById(id: string) {
       identity: { select: { email: true } },
       phone: true,
       address: true,
+      regions: true,
       contactName: true,
       crNumber: true,
       isActive: true,
       createdAt: true,
-    },
+    } as any,
   });
 
   if (!contractor) throw new AppError('Contractor not found', 404);
@@ -380,6 +406,7 @@ export async function updateContractor(id: string, data: z.infer<typeof UpdateCo
       companyName: data.companyName,
       phone: data.phone,
       address: data.address,
+      ...(data.regions && { regions: data.regions }),
       ...(data.email && {
         identity: {
           update: {
@@ -387,7 +414,7 @@ export async function updateContractor(id: string, data: z.infer<typeof UpdateCo
           },
         },
       }),
-    },
+    } as any,
     select: {
       id: true,
       contractorId: true,
@@ -395,11 +422,63 @@ export async function updateContractor(id: string, data: z.infer<typeof UpdateCo
       identity: { select: { email: true } },
       phone: true,
       address: true,
+      regions: true,
       contactName: true,
       crNumber: true,
       isActive: true,
       createdAt: true,
+    } as any,
+  });
+}
+
+export async function createContractor(data: z.infer<typeof CreateContractorSchema>) {
+  const existingIdentity = await prisma.identity.findUnique({
+    where: { email: data.email },
+  });
+  if (existingIdentity) throw new AppError('Email already in use', 409);
+
+  const existingContractor = await prisma.contractor.findFirst({
+    where: {
+      OR: [{ contractorId: data.contractorId }, { crNumber: data.crNumber }],
     },
+  });
+  if (existingContractor) throw new AppError('Contractor already exists', 409);
+
+  const passwordHash = await bcrypt.hash('mobile123', 10);
+
+  return prisma.contractor.create({
+    data: {
+      contractorId: data.contractorId,
+      companyName: data.companyName,
+      tradeLicense: data.tradeLicense,
+      crNumber: data.crNumber,
+      contactName: data.contactName,
+      phone: data.phone,
+      address: data.address,
+      regions: data.regions ?? [],
+      isActive: true,
+      identity: {
+        create: {
+          email: data.email,
+          password: passwordHash,
+          role: 'CONTRACTOR',
+          isActive: true,
+        },
+      },
+    } as any,
+    select: {
+      id: true,
+      contractorId: true,
+      companyName: true,
+      identity: { select: { email: true } },
+      phone: true,
+      address: true,
+      regions: true,
+      contactName: true,
+      crNumber: true,
+      isActive: true,
+      createdAt: true,
+    } as any,
   });
 }
 

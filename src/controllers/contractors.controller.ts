@@ -1,6 +1,23 @@
 import { NextFunction, Request, Response } from 'express';
 import * as ContractorsService from '../services/contractors.service';
-import { UpdateContractorSchema, UpdateContractorStatusSchema } from '../services/contractors.service';
+import { CreateContractorSchema, UpdateContractorSchema, UpdateContractorStatusSchema } from '../services/contractors.service';
+
+const VALID_REGIONS = [
+  'Musandam',
+  'Al Buraimi',
+  'Al Dhahirah',
+  'Al Dakhiliyah',
+  'North Al Batinah',
+  'South Al Batinah',
+  'Muscat',
+  'North Al Sharqiyah',
+  'South Al Sharqiyah',
+  'Al Wusta',
+];
+
+function normalizeRegions(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((region): region is string => typeof region === 'string' && VALID_REGIONS.includes(region)) : [];
+}
 
 export const list = async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -53,9 +70,31 @@ export const getPerformance = async (req: Request, res: Response, next: NextFunc
   }
 };
 
+export const create = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const parsed = CreateContractorSchema.safeParse({
+      ...req.body,
+      regions: normalizeRegions(req.body.regions),
+    });
+    if (!parsed.success) {
+      return res.status(400).json({
+        error: 'Validation failed',
+        details: parsed.error.flatten().fieldErrors,
+      });
+    }
+    const data = await ContractorsService.createContractor(parsed.data);
+    return res.status(201).json({ data });
+  } catch (err) {
+    return next(err);
+  }
+};
+
 export const update = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const parsed = UpdateContractorSchema.safeParse(req.body);
+    const parsed = UpdateContractorSchema.safeParse({
+      ...req.body,
+      regions: req.body.regions !== undefined ? normalizeRegions(req.body.regions) : undefined,
+    });
     if (!parsed.success) {
       return res.status(400).json({
         error: 'Validation failed',
