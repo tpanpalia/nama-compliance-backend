@@ -1,402 +1,951 @@
-import '../src/config/loadEnv';
-import bcrypt from 'bcryptjs';
+import { RatingValue, WorkOrderStatus } from '@prisma/client';
 import { createClient } from '@supabase/supabase-js';
-import { ComplianceBand, EvidenceSource, EvidenceType, IdentityRole, PrismaClient, RatingValue, UserRole, WorkOrderPriority, WorkOrderStatus } from '@prisma/client';
-import * as fs from 'fs';
-import * as path from 'path';
+import * as bcrypt from 'bcryptjs';
+import { randomUUID } from 'crypto';
+import * as dotenv from 'dotenv';
 
-const prisma = new PrismaClient();
-const PASSWORD = 'mobile123';
-const PHOTOS_DIR = 'C:\\Users\\FCI\\Desktop\\NAMA\\Compliance\\photos';
-const SUPABASE_URL = process.env.SUPABASE_URL || '';
-const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_ANON_KEY || '';
-const BUCKET = process.env.SUPABASE_STORAGE_BUCKET || process.env.SUPABASE_BUCKET || 'compliance-files';
-const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, { auth: { persistSession: false, autoRefreshToken: false } });
+dotenv.config();
 
-type UploadedPhoto = { key: string; url: string; fileName: string; fileSize: number };
-type UserSpec = { displayName: string; email: string; role: UserRole; identityRole: IdentityRole; organisation?: string | null; department?: string | null };
-type ContractorSpec = { code: string; companyName: string; crNumber: string; tradeLicense: string; contactName: string; email: string; phone: string; address: string; regions: string[] };
-type SiteSpec = { code: string; name: string; location: string; latitude: number; longitude: number; region: string };
-type WorkOrderSpec = { key: string; date: string; seq: string; title: string; status: WorkOrderStatus; priority: WorkOrderPriority; siteCode: string; contractorCode?: string; inspectorEmail?: string; scheduledDate: string; startedAt?: string; submittedAt?: string; approvedAt?: string; rejectionReason?: string };
+const supabase = createClient(
+  process.env.SUPABASE_URL!,
+  process.env.SUPABASE_SERVICE_ROLE_KEY ??
+    process.env.SUPABASE_SERVICE_KEY ??
+    process.env.SUPABASE_ANON_KEY!
+);
 
-const admins: UserSpec[] = [
-  { displayName: 'Ahmed Al-Balushi', email: 'admin@nama.om', role: UserRole.ADMIN, identityRole: IdentityRole.ADMIN },
-  { displayName: 'Fatima Al-Zadjali', email: 'fatima@nama.om', role: UserRole.ADMIN, identityRole: IdentityRole.ADMIN },
+const BUCKET =
+  process.env.SUPABASE_STORAGE_BUCKET ??
+  process.env.SUPABASE_BUCKET ??
+  'compliance-files';
+
+const TABLES = {
+  user: 'User',
+  contractor: 'Contractor',
+  identity: 'Identity',
+  site: 'Site',
+  checklistTemplate: 'ChecklistTemplate',
+  checklistSection: 'ChecklistSection',
+  checklistItem: 'ChecklistItem',
+  workOrder: 'WorkOrder',
+  workOrderChecklist: 'WorkOrderChecklist',
+  checklistResponse: 'ChecklistResponse',
+  evidence: 'Evidence',
+  contractorItemComment: 'ContractorItemComment',
+  auditLog: 'AuditLog',
+  accessRequest: 'AccessRequest',
+  accessRequestDocument: 'AccessRequestDocument',
+  reportLog: 'ReportLog',
+} as const;
+
+const PASSWORD_HASH = bcrypt.hashSync('mobile123', 10);
+
+type MonthSlot = { year: number; month: number };
+
+type RegionSeed = {
+  name: string;
+  contractors: string[];
+  sites: Array<{
+    name: string;
+    location: string;
+    lat: number;
+    lng: number;
+  }>;
+};
+
+type CreatedItem = {
+  id: string;
+  text: string;
+  sectionName: string;
+  sectionWeight: number;
+  order: number;
+};
+
+const PHOTO_KEYS = Array.from({ length: 17 }, (_, i) => `seed/evidence/photo_${String(i + 1).padStart(2, '0')}.jpeg`);
+
+const photoUrl = (key: string) => supabase.storage.from(BUCKET).getPublicUrl(key).data.publicUrl;
+
+let photoIdx = 0;
+
+function nextPhoto() {
+  const key = PHOTO_KEYS[photoIdx % PHOTO_KEYS.length];
+  photoIdx += 1;
+  return { key, url: photoUrl(key) };
+}
+
+const SEED_MONTHS: MonthSlot[] = [
+  { year: 2025, month: 9 },
+  { year: 2025, month: 10 },
+  { year: 2025, month: 11 },
+  { year: 2026, month: 0 },
+  { year: 2026, month: 1 },
+  { year: 2026, month: 2 },
 ];
-const inspectors: UserSpec[] = [
-  { displayName: 'Khalid Al-Rashdi', email: 'inspector1@nama.om', role: UserRole.INSPECTOR, identityRole: IdentityRole.INSPECTOR },
-  { displayName: 'Sara Al-Hinai', email: 'inspector2@nama.om', role: UserRole.INSPECTOR, identityRole: IdentityRole.INSPECTOR },
-  { displayName: 'Mohammed Al-Farsi', email: 'inspector3@nama.om', role: UserRole.INSPECTOR, identityRole: IdentityRole.INSPECTOR },
-  { displayName: 'Noor Al-Lawati', email: 'inspector4@nama.om', role: UserRole.INSPECTOR, identityRole: IdentityRole.INSPECTOR },
-  { displayName: 'Tariq Al-Maqbali', email: 'inspector5@nama.om', role: UserRole.INSPECTOR, identityRole: IdentityRole.INSPECTOR },
-];
-const regulators: UserSpec[] = [
-  { displayName: 'Salim Al-Wahaibi', email: 'regulator1@nama.om', role: UserRole.REGULATOR, identityRole: IdentityRole.REGULATOR, organisation: 'Authority for Public Services Regulation', department: 'Water Compliance' },
-  { displayName: 'Huda Al-Siyabi', email: 'regulator2@nama.om', role: UserRole.REGULATOR, identityRole: IdentityRole.REGULATOR, organisation: 'Ministry of Housing', department: 'Field Oversight' },
-];
-const contractorSpecs: ContractorSpec[] = [
-  { code: 'CNT-001', companyName: 'Al Noor Construction LLC', crNumber: 'CR-2024-001', tradeLicense: 'TL-2024-001', contactName: 'Hassan Al-Noor', email: 'alnoor@contractor.om', phone: '+968 9100 0001', address: 'Al Khuwair, Muscat', regions: ['Muscat'] },
-  { code: 'CNT-002', companyName: 'Muscat Infrastructure Co.', crNumber: 'CR-2024-002', tradeLicense: 'TL-2024-002', contactName: 'Layla Al-Muscat', email: 'muscat.infra@contractor.om', phone: '+968 9100 0002', address: 'Seeb, Muscat', regions: ['Muscat'] },
-  { code: 'CNT-003', companyName: 'Gulf Water Systems LLC', crNumber: 'CR-2024-003', tradeLicense: 'TL-2024-003', contactName: 'Samir Al-Gulf', email: 'gulf.water@contractor.om', phone: '+968 9100 0003', address: 'Sohar, Al Batinah North', regions: ['North Al Batinah'] },
-  { code: 'CNT-004', companyName: 'Oman Pipeline Services', crNumber: 'CR-2024-004', tradeLicense: 'TL-2024-004', contactName: 'Rania Al-Pipe', email: 'oman.pipeline@contractor.om', phone: '+968 9100 0004', address: 'Barka, Al Batinah South', regions: ['South Al Batinah'] },
-  { code: 'CNT-005', companyName: 'Al Madina Contracting', crNumber: 'CR-2024-005', tradeLicense: 'TL-2024-005', contactName: 'Yousef Al-Madina', email: 'almadina@contractor.om', phone: '+968 9100 0005', address: 'Nizwa, Ad Dakhiliyah', regions: ['Al Dakhiliyah'] },
-  { code: 'CNT-006', companyName: 'Seeb Technical Services', crNumber: 'CR-2024-006', tradeLicense: 'TL-2024-006', contactName: 'Maryam Al-Seeb', email: 'seeb.tech@contractor.om', phone: '+968 9100 0006', address: 'Al Khoud, Muscat', regions: ['Muscat'] },
-  { code: 'CNT-007', companyName: 'Barka Engineering LLC', crNumber: 'CR-2024-007', tradeLicense: 'TL-2024-007', contactName: 'Faisal Al-Barka', email: 'barka.eng@contractor.om', phone: '+968 9100 0007', address: 'Barka, Al Batinah South', regions: ['South Al Batinah'] },
-  { code: 'CNT-008', companyName: 'Sohar Civil Works', crNumber: 'CR-2024-008', tradeLicense: 'TL-2024-008', contactName: 'Amira Al-Sohar', email: 'sohar.civil@contractor.om', phone: '+968 9100 0008', address: 'Sohar, Al Batinah North', regions: ['North Al Batinah'] },
-  { code: 'CNT-009', companyName: 'Nizwa Water Solutions', crNumber: 'CR-2024-009', tradeLicense: 'TL-2024-009', contactName: 'Ibrahim Al-Nizwa', email: 'nizwa.water@contractor.om', phone: '+968 9100 0009', address: 'Nizwa, Ad Dakhiliyah', regions: ['Al Dakhiliyah'] },
-  { code: 'CNT-010', companyName: 'Al Khoud Development Co.', crNumber: 'CR-2024-010', tradeLicense: 'TL-2024-010', contactName: 'Dina Al-Khoud', email: 'alkhoud.dev@contractor.om', phone: '+968 9100 0010', address: 'Al Khoud, Muscat', regions: ['Muscat', 'North Al Batinah'] },
-];
-const siteSpecs: SiteSpec[] = [
-  { code: 'AL_KHOUD', name: 'Al Khoud Water Extension', location: 'Al Khoud, Muscat', latitude: 23.5969, longitude: 58.1628, region: 'Muscat' },
-  { code: 'SEEB', name: 'Seeb Industrial Pipeline', location: 'Seeb Industrial Area, Muscat', latitude: 23.6789, longitude: 58.1234, region: 'Muscat' },
-  { code: 'BARKA', name: 'Barka Desalination Link', location: 'Barka, Al Batinah South', latitude: 23.6825, longitude: 57.8921, region: 'Al Batinah' },
-  { code: 'SOHAR', name: 'Sohar Port Water Supply', location: 'Sohar Industrial Port, Al Batinah North', latitude: 24.3421, longitude: 56.7234, region: 'Al Batinah' },
-  { code: 'NIZWA', name: 'Nizwa Distribution Network', location: 'Nizwa City Centre, Ad Dakhiliyah', latitude: 22.9333, longitude: 57.5333, region: 'Ad Dakhiliyah' },
-  { code: 'MUSCAT_HILLS', name: 'Muscat Hills Reservoir', location: 'Muscat Hills, Muscat', latitude: 23.6012, longitude: 58.5234, region: 'Muscat' },
-  { code: 'SUR', name: 'Sur Coastal Pipeline', location: 'Sur, Ash Sharqiyah South', latitude: 22.5678, longitude: 59.5289, region: 'Ash Sharqiyah' },
-  { code: 'SALALAH', name: 'Salalah Water Network', location: 'Salalah, Dhofar', latitude: 17.0151, longitude: 54.0924, region: 'Dhofar' },
-];
-const commentSamples = [
-  'Warning tapes installed along the entire perimeter of the excavation site. Barriers placed at all access points.',
-  'All workers equipped with standard PPE including safety helmets, high-visibility vests, and steel-toe boots.',
-  'Trench excavated to 1.5m depth and 0.8m width as specified in drawings. Measurements verified with measuring tape.',
-  'Excavated soil stored 2 meters away from trench edge to prevent collapse risk.',
-  'Pipe bedding material (sand) laid to 150mm depth as per approved specification.',
-  'All joints properly aligned using approved couplings. Pressure test scheduled for tomorrow morning.',
+
+const WO_STATUS_PATTERN = [
+  'PENDING',
+  'PENDING',
+  'ASSIGNED',
+  'IN_PROGRESS',
+  'SUBMITTED',
+  'SUBMITTED',
+  'INSPECTION_COMPLETED',
+  'INSPECTION_COMPLETED',
+  'INSPECTION_COMPLETED',
+  'REJECTED',
+] as const satisfies readonly WorkOrderStatus[];
+
+const PRIORITIES = [
+  'LOW',
+  'MEDIUM',
+  'MEDIUM',
+  'HIGH',
+  'HIGH',
+  'CRITICAL',
+  'MEDIUM',
+  'LOW',
+  'HIGH',
+  'MEDIUM',
+] as const;
+
+const RATING_PATTERN = [
+  'COMPLIANT',
+  'COMPLIANT',
+  'COMPLIANT',
+  'PARTIAL',
+  'COMPLIANT',
+  'COMPLIANT',
+  'COMPLIANT',
+  'NON_COMPLIANT',
+  'COMPLIANT',
+  'COMPLIANT',
+  'COMPLIANT',
+  'PARTIAL',
+  'COMPLIANT',
+  'COMPLIANT',
+] as const satisfies readonly RatingValue[];
+
+const RATING_POINTS: Record<RatingValue, number> = {
+  COMPLIANT: 100,
+  PARTIAL: 60,
+  NON_COMPLIANT: 0,
+};
+
+const INSPECTOR_COMMENTS: Record<RatingValue, string[]> = {
+  COMPLIANT: [
+    'All requirements met. Work is satisfactory.',
+    'Properly installed and meets specifications.',
+    'Verified and confirmed compliant.',
+    'Standards met. No issues observed.',
+    'Work completed to approved standard.',
+    'Inspected and confirmed fully compliant.',
+  ],
+  PARTIAL: [
+    'Mostly compliant but minor gaps observed.',
+    'Partial compliance — follow-up required.',
+    'Some areas need attention before sign-off.',
+    'Acceptable with minor deficiencies noted.',
+  ],
+  NON_COMPLIANT: [
+    'Does not meet specifications. Rework required.',
+    'Non-compliant. Contractor must rectify.',
+    'Failed inspection. Immediate action needed.',
+  ],
+};
+
+const CONTRACTOR_COMMENTS = [
+  'Warning tapes installed along the entire perimeter. Barriers placed at all access points.',
+  'All workers equipped with standard PPE including helmets, vests, and steel-toe boots.',
+  'Trench excavated to approved depth and width. Measurements verified with measuring tape.',
+  'Excavated soil stored 2m away from trench edge to prevent collapse risk.',
+  'Pipe bedding material laid to 150mm depth as per approved specification.',
+  'All joints properly aligned using approved couplings. Pressure test completed.',
   'Site barricaded with warning signs in Arabic and English. Security guard on duty.',
-  'Backfilling completed in 300mm layers, each layer compacted with vibrating plate.',
-];
-const ratingPattern: RatingValue[] = [
-  RatingValue.COMPLIANT, RatingValue.COMPLIANT, RatingValue.COMPLIANT, RatingValue.PARTIAL, RatingValue.COMPLIANT,
-  RatingValue.COMPLIANT, RatingValue.COMPLIANT, RatingValue.NON_COMPLIANT, RatingValue.COMPLIANT, RatingValue.COMPLIANT,
-  RatingValue.COMPLIANT, RatingValue.PARTIAL, RatingValue.COMPLIANT, RatingValue.COMPLIANT, RatingValue.COMPLIANT,
-];
-const workOrders: WorkOrderSpec[] = [
-  { key: 'P1', date: '2026-03-14', seq: '0001', title: 'Al Khoud Extension Phase 3 Inspection', status: WorkOrderStatus.PENDING, priority: WorkOrderPriority.MEDIUM, siteCode: 'AL_KHOUD', scheduledDate: '2026-03-20T08:00:00Z' },
-  { key: 'P2', date: '2026-03-12', seq: '0002', title: 'Sohar Port Water Supply Pre-Inspection', status: WorkOrderStatus.PENDING, priority: WorkOrderPriority.HIGH, siteCode: 'SOHAR', scheduledDate: '2026-03-22T08:00:00Z' },
-  { key: 'P3', date: '2026-03-10', seq: '0003', title: 'Salalah Network Expansion Review', status: WorkOrderStatus.PENDING, priority: WorkOrderPriority.LOW, siteCode: 'SALALAH', scheduledDate: '2026-03-25T08:00:00Z' },
-  { key: 'A1', date: '2026-03-08', seq: '0004', title: 'Seeb Industrial Corridor Inspection', status: WorkOrderStatus.ASSIGNED, priority: WorkOrderPriority.HIGH, siteCode: 'SEEB', contractorCode: 'CNT-006', inspectorEmail: 'inspector1@nama.om', scheduledDate: '2026-03-15T08:00:00Z' },
-  { key: 'A2', date: '2026-03-07', seq: '0005', title: 'Muscat Hills Reservoir Safety Walkthrough', status: WorkOrderStatus.ASSIGNED, priority: WorkOrderPriority.MEDIUM, siteCode: 'MUSCAT_HILLS', contractorCode: 'CNT-002', inspectorEmail: 'inspector2@nama.om', scheduledDate: '2026-03-14T08:00:00Z' },
-  { key: 'A3', date: '2026-03-06', seq: '0006', title: 'Sur Coastal Pipeline Initial Inspection', status: WorkOrderStatus.ASSIGNED, priority: WorkOrderPriority.CRITICAL, siteCode: 'SUR', contractorCode: 'CNT-008', inspectorEmail: 'inspector3@nama.om', scheduledDate: '2026-03-18T08:00:00Z' },
-  { key: 'IP1', date: '2026-03-05', seq: '0007', title: 'Barka Desalination Link Active Inspection', status: WorkOrderStatus.IN_PROGRESS, priority: WorkOrderPriority.HIGH, siteCode: 'BARKA', contractorCode: 'CNT-007', inspectorEmail: 'inspector4@nama.om', scheduledDate: '2026-03-08T08:00:00Z', startedAt: '2026-03-06T07:30:00Z' },
-  { key: 'IP2', date: '2026-03-04', seq: '0008', title: 'Nizwa Distribution Network Trench Review', status: WorkOrderStatus.IN_PROGRESS, priority: WorkOrderPriority.MEDIUM, siteCode: 'NIZWA', contractorCode: 'CNT-009', inspectorEmail: 'inspector1@nama.om', scheduledDate: '2026-03-10T08:00:00Z', startedAt: '2026-03-05T09:00:00Z' },
-  { key: 'IP3', date: '2026-03-03', seq: '0009', title: 'Sohar Port Booster Line Inspection', status: WorkOrderStatus.IN_PROGRESS, priority: WorkOrderPriority.MEDIUM, siteCode: 'SOHAR', contractorCode: 'CNT-003', inspectorEmail: 'inspector5@nama.om', scheduledDate: '2026-03-09T08:00:00Z', startedAt: '2026-03-04T08:45:00Z' },
-  { key: 'S1', date: '2026-03-02', seq: '0010', title: 'Al Khoud Night Shift Submission', status: WorkOrderStatus.SUBMITTED, priority: WorkOrderPriority.HIGH, siteCode: 'AL_KHOUD', contractorCode: 'CNT-010', inspectorEmail: 'inspector2@nama.om', scheduledDate: '2026-03-04T08:00:00Z', startedAt: '2026-03-02T07:00:00Z', submittedAt: '2026-03-03T15:00:00Z' },
-  { key: 'S2', date: '2026-03-01', seq: '0011', title: 'Pipeline Pressure Test Submission', status: WorkOrderStatus.SUBMITTED, priority: WorkOrderPriority.MEDIUM, siteCode: 'SEEB', contractorCode: 'CNT-001', inspectorEmail: 'inspector3@nama.om', scheduledDate: '2026-03-03T08:00:00Z', startedAt: '2026-03-01T08:00:00Z', submittedAt: '2026-03-02T13:30:00Z' },
-  { key: 'S3', date: '2026-02-28', seq: '0012', title: 'Muscat Hills Restoration Submission', status: WorkOrderStatus.SUBMITTED, priority: WorkOrderPriority.LOW, siteCode: 'MUSCAT_HILLS', contractorCode: 'CNT-002', inspectorEmail: 'inspector4@nama.om', scheduledDate: '2026-03-02T08:00:00Z', startedAt: '2026-02-28T08:15:00Z', submittedAt: '2026-03-01T11:20:00Z' },
-  { key: 'S4', date: '2026-02-27', seq: '0013', title: 'Salalah Road Crossing Submission', status: WorkOrderStatus.SUBMITTED, priority: WorkOrderPriority.HIGH, siteCode: 'SALALAH', contractorCode: 'CNT-004', inspectorEmail: 'inspector5@nama.om', scheduledDate: '2026-03-01T08:00:00Z', startedAt: '2026-02-27T09:10:00Z', submittedAt: '2026-02-28T17:10:00Z' },
-  { key: 'IC1', date: '2026-02-26', seq: '0014', title: 'Al Khoud Mainline Completion Audit', status: WorkOrderStatus.INSPECTION_COMPLETED, priority: WorkOrderPriority.HIGH, siteCode: 'AL_KHOUD', contractorCode: 'CNT-001', inspectorEmail: 'inspector1@nama.om', scheduledDate: '2026-02-27T08:00:00Z', startedAt: '2026-02-24T08:00:00Z', submittedAt: '2026-02-26T14:00:00Z', approvedAt: '2026-02-26T14:45:00Z' },
-  { key: 'IC2', date: '2026-02-24', seq: '0015', title: 'Barka Link Trench Inspection', status: WorkOrderStatus.INSPECTION_COMPLETED, priority: WorkOrderPriority.MEDIUM, siteCode: 'BARKA', contractorCode: 'CNT-007', inspectorEmail: 'inspector2@nama.om', scheduledDate: '2026-02-25T08:00:00Z', startedAt: '2026-02-22T08:00:00Z', submittedAt: '2026-02-24T15:00:00Z', approvedAt: '2026-02-24T15:30:00Z' },
-  { key: 'IC3', date: '2026-02-22', seq: '0016', title: 'Pipeline Materials Verification Audit', status: WorkOrderStatus.INSPECTION_COMPLETED, priority: WorkOrderPriority.HIGH, siteCode: 'SOHAR', contractorCode: 'CNT-003', inspectorEmail: 'inspector3@nama.om', scheduledDate: '2026-02-23T08:00:00Z', startedAt: '2026-02-20T08:00:00Z', submittedAt: '2026-02-22T13:00:00Z', approvedAt: '2026-02-22T13:40:00Z' },
-  { key: 'IC4', date: '2026-02-20', seq: '0017', title: 'Seeb Safety and Closure Audit', status: WorkOrderStatus.INSPECTION_COMPLETED, priority: WorkOrderPriority.MEDIUM, siteCode: 'SEEB', contractorCode: 'CNT-006', inspectorEmail: 'inspector4@nama.om', scheduledDate: '2026-02-21T08:00:00Z', startedAt: '2026-02-18T08:00:00Z', submittedAt: '2026-02-20T16:10:00Z', approvedAt: '2026-02-20T16:30:00Z' },
-  { key: 'IC5', date: '2026-02-18', seq: '0018', title: 'Nizwa Excavation Completion Review', status: WorkOrderStatus.INSPECTION_COMPLETED, priority: WorkOrderPriority.CRITICAL, siteCode: 'NIZWA', contractorCode: 'CNT-009', inspectorEmail: 'inspector5@nama.om', scheduledDate: '2026-02-19T08:00:00Z', startedAt: '2026-02-16T08:00:00Z', submittedAt: '2026-02-18T14:50:00Z', approvedAt: '2026-02-18T15:15:00Z' },
-  { key: 'IC6', date: '2026-02-16', seq: '0019', title: 'Muscat Hills Reservoir Inspection Closeout', status: WorkOrderStatus.INSPECTION_COMPLETED, priority: WorkOrderPriority.LOW, siteCode: 'MUSCAT_HILLS', contractorCode: 'CNT-002', inspectorEmail: 'inspector1@nama.om', scheduledDate: '2026-02-17T08:00:00Z', startedAt: '2026-02-14T08:00:00Z', submittedAt: '2026-02-16T12:40:00Z', approvedAt: '2026-02-16T13:00:00Z' },
-  { key: 'IC7', date: '2026-02-14', seq: '0020', title: 'Sur Coastal Reinforcement Final Inspection', status: WorkOrderStatus.INSPECTION_COMPLETED, priority: WorkOrderPriority.HIGH, siteCode: 'SUR', contractorCode: 'CNT-008', inspectorEmail: 'inspector2@nama.om', scheduledDate: '2026-02-15T08:00:00Z', startedAt: '2026-02-12T08:00:00Z', submittedAt: '2026-02-14T10:30:00Z', approvedAt: '2026-02-14T11:00:00Z' },
-  { key: 'IC8', date: '2026-02-12', seq: '0021', title: 'Salalah Network Handover Inspection', status: WorkOrderStatus.INSPECTION_COMPLETED, priority: WorkOrderPriority.MEDIUM, siteCode: 'SALALAH', contractorCode: 'CNT-004', inspectorEmail: 'inspector3@nama.om', scheduledDate: '2026-02-13T08:00:00Z', startedAt: '2026-02-10T08:00:00Z', submittedAt: '2026-02-12T11:00:00Z', approvedAt: '2026-02-12T11:45:00Z' },
+  'Backfilling completed in 300mm layers, each compacted with vibrating plate.',
 ];
 
-const scoreBand = (score: number): ComplianceBand => score >= 90 ? ComplianceBand.EXCELLENT : score >= 70 ? ComplianceBand.GOOD : score >= 50 ? ComplianceBand.FAIR : ComplianceBand.POOR;
-const ratingPoints = (rating: RatingValue) => (rating === RatingValue.COMPLIANT ? 100 : rating === RatingValue.PARTIAL ? 60 : 0);
-const ref = (date: Date, seq: string) => `WO-${date.toISOString().slice(0, 10).replace(/-/g, '')}-${seq}`;
-const dt = (value?: string) => (value ? new Date(value) : null);
-const offset = (base: number, index: number) => Math.round((base + 0.0002 + index * 0.0001) * 1e6) / 1e6;
+const REJECTION_REASONS = [
+  'Insufficient evidence provided. Photos do not clearly show completed work.',
+  'PPE compliance not demonstrated in photos. Resubmit with clear evidence.',
+  'Trench dimensions not matching approved drawings. Measurement photos required.',
+  'Site not properly barricaded. Safety standards not met.',
+];
 
-async function uploadPhotos(): Promise<UploadedPhoto[]> {
-  const files = fs.readdirSync(PHOTOS_DIR).filter((f) => /\.jpe?g$/i.test(f)).sort();
-  if (files.length !== 17) throw new Error(`Expected 17 photos, found ${files.length}`);
-  const uploaded: UploadedPhoto[] = [];
-  for (let i = 0; i < files.length; i += 1) {
-    const file = files[i];
-    const key = `seed/evidence/photo_${String(i + 1).padStart(2, '0')}.jpeg`;
-    const buffer = fs.readFileSync(path.join(PHOTOS_DIR, file));
-    console.log(`Uploading ${i + 1}/${files.length}: ${file}`);
-    await supabase.storage.from(BUCKET).remove([key]);
-    const { error } = await supabase.storage.from(BUCKET).upload(key, buffer, { contentType: 'image/jpeg', upsert: true });
-    if (error) throw new Error(`Failed to upload ${file}: ${error.message}`);
-    const { data } = supabase.storage.from(BUCKET).getPublicUrl(key);
-    uploaded.push({ key, url: data.publicUrl, fileName: `photo_${String(i + 1).padStart(2, '0')}.jpeg`, fileSize: buffer.length });
-  }
-  console.log(`? Uploaded ${uploaded.length} photos to Supabase`);
-  return uploaded;
+const REGIONS_DATA: RegionSeed[] = [
+  {
+    name: 'Musandam',
+    contractors: ['Musandam Civil Works LLC', 'Khasab Infrastructure Co.', 'Northern Oman Contractors'],
+    sites: [
+      { name: 'Khasab Water Supply', location: 'Khasab, Musandam', lat: 26.1843, lng: 56.2463 },
+      { name: 'Bukha Pipeline Extension', location: 'Bukha, Musandam', lat: 26.1521, lng: 56.1923 },
+    ],
+  },
+  {
+    name: 'Al Buraimi',
+    contractors: ['Al Buraimi Engineering LLC', 'Border Region Construction', 'Al Dhafra Water Services'],
+    sites: [
+      { name: 'Al Buraimi Distribution Network', location: 'Al Buraimi City', lat: 24.2322, lng: 55.7854 },
+      { name: 'Mahadha Water Station', location: 'Mahadha, Al Buraimi', lat: 24.0853, lng: 55.9891 },
+    ],
+  },
+  {
+    name: 'Al Dhahirah',
+    contractors: ['Ibri Pipeline Services', 'Al Dhahirah Civil Works', 'Yanqul Construction LLC'],
+    sites: [
+      { name: 'Ibri Water Treatment Plant', location: 'Ibri, Al Dhahirah', lat: 23.2253, lng: 56.5138 },
+      { name: 'Yanqul Pipeline', location: 'Yanqul, Al Dhahirah', lat: 23.5847, lng: 56.8012 },
+    ],
+  },
+  {
+    name: 'Al Dakhiliyah',
+    contractors: ['Nizwa Water Solutions', 'Al Dakhiliyah Contracting', 'Bahla Infrastructure LLC', 'Interior Region Services'],
+    sites: [
+      { name: 'Nizwa Distribution Network', location: 'Nizwa City, Al Dakhiliyah', lat: 22.9333, lng: 57.5333 },
+      { name: 'Bahla Water Extension', location: 'Bahla, Al Dakhiliyah', lat: 22.9665, lng: 57.2952 },
+      { name: 'Manah Pipeline Project', location: 'Manah, Al Dakhiliyah', lat: 22.8823, lng: 57.7821 },
+    ],
+  },
+  {
+    name: 'North Al Batinah',
+    contractors: ['Sohar Civil Works', 'North Batinah Pipeline Co.', 'Gulf Coast Construction', 'Liwa Technical Services'],
+    sites: [
+      { name: 'Sohar Port Water Supply', location: 'Sohar Industrial Port', lat: 24.3421, lng: 56.7234 },
+      { name: 'Shinas Water Network', location: 'Shinas, North Al Batinah', lat: 24.7449, lng: 56.4619 },
+      { name: 'Liwa Coastal Pipeline', location: 'Liwa, North Al Batinah', lat: 24.5081, lng: 56.5453 },
+    ],
+  },
+  {
+    name: 'South Al Batinah',
+    contractors: ['Barka Engineering LLC', 'Seeb Technical Services', 'South Batinah Contractors', 'Nakhal Water Works'],
+    sites: [
+      { name: 'Barka Desalination Link', location: 'Barka, South Al Batinah', lat: 23.6825, lng: 57.8921 },
+      { name: 'Seeb Industrial Pipeline', location: 'Seeb Industrial Area', lat: 23.6789, lng: 58.1234 },
+      { name: 'Nakhal Water Station', location: 'Nakhal, South Al Batinah', lat: 23.3741, lng: 57.8231 },
+    ],
+  },
+  {
+    name: 'Muscat',
+    contractors: ['Al Noor Construction LLC', 'Muscat Infrastructure Co.', 'Al Khoud Development Co.', 'Capital Region Services'],
+    sites: [
+      { name: 'Al Khoud Water Extension', location: 'Al Khoud, Muscat', lat: 23.5969, lng: 58.1628 },
+      { name: 'Muscat Hills Reservoir', location: 'Muscat Hills', lat: 23.6012, lng: 58.5234 },
+      { name: 'Qurum Distribution Hub', location: 'Qurum, Muscat', lat: 23.5883, lng: 58.3912 },
+      { name: 'Mawaleh Pipeline', location: 'Al Mawaleh, Muscat', lat: 23.5741, lng: 58.1823 },
+    ],
+  },
+  {
+    name: 'North Al Sharqiyah',
+    contractors: ['Ibra Technical Services', 'Al Sharqiyah Pipeline LLC', 'Sinaw Civil Works', 'Eastern Oman Contractors'],
+    sites: [
+      { name: 'Ibra Water Network', location: 'Ibra, North Al Sharqiyah', lat: 22.6913, lng: 58.5331 },
+      { name: 'Al Mudaybi Pipeline', location: 'Al Mudaybi, North Al Sharqiyah', lat: 22.5423, lng: 58.1012 },
+      { name: 'Sinaw Distribution', location: 'Sinaw, North Al Sharqiyah', lat: 22.4127, lng: 57.9123 },
+    ],
+  },
+  {
+    name: 'South Al Sharqiyah',
+    contractors: ['Sur Water Solutions', 'Coastal Pipeline Services', 'Al Hadd Construction LLC'],
+    sites: [
+      { name: 'Sur Coastal Pipeline', location: 'Sur, South Al Sharqiyah', lat: 22.5678, lng: 59.5289 },
+      { name: 'Ras Al Hadd Water Station', location: 'Ras Al Hadd', lat: 22.5321, lng: 59.7923 },
+    ],
+  },
+  {
+    name: 'Al Wusta',
+    contractors: ['Haima Engineering LLC', 'Duqm Industrial Services', 'Central Oman Contractors'],
+    sites: [
+      { name: 'Haima Water Supply', location: 'Haima, Al Wusta', lat: 19.9583, lng: 56.276 },
+      { name: 'Duqm Industrial Water', location: 'Duqm, Al Wusta', lat: 19.658, lng: 57.7019 },
+    ],
+  },
+];
+
+const CHECKLIST_DATA = [
+  {
+    name: 'HSE & Safety',
+    weight: 0.3,
+    order: 1,
+    items: [
+      { text: "Contractor workers' compliance with wearing PPE", weight: 10, order: 1 },
+      { text: 'Condition of equipment used by the contractor', weight: 10, order: 2 },
+      { text: 'Overall compliance with Nama HSE standards', weight: 10, order: 3 },
+    ],
+  },
+  {
+    name: 'Technical Installation',
+    weight: 0.4,
+    order: 2,
+    items: [
+      { text: 'Compliance of excavation works with specified pipe diameter', weight: 8, order: 1 },
+      { text: 'Installation of warning tape above pipeline', weight: 7, order: 2 },
+      { text: 'Sand bedding installation', weight: 8, order: 3 },
+      { text: 'Ground leveling, soil compaction, removal of rocks', weight: 7, order: 4 },
+      { text: 'Flushing pipeline after installation and before meter', weight: 9, order: 5 },
+      { text: 'Installation of marker posts', weight: 5, order: 6 },
+      { text: 'Installation of identification tag', weight: 4, order: 7 },
+    ],
+  },
+  {
+    name: 'Process & Communication',
+    weight: 0.2,
+    order: 3,
+    items: [
+      { text: 'Notification to Nama before/during/after works', weight: 8, order: 1 },
+      { text: 'Monthly technical report submission', weight: 7, order: 2 },
+      { text: 'Worker list submission', weight: 5, order: 3 },
+    ],
+  },
+  {
+    name: 'Site Closure',
+    weight: 0.1,
+    order: 4,
+    items: [{ text: 'Site cleaning and reinstatement', weight: 3, order: 1 }],
+  },
+] as const;
+
+function slug(value: string) {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '.')
+    .replace(/\.+/g, '.')
+    .replace(/^\./, '')
+    .replace(/\.$/, '');
 }
+
+function monthForWoIndex(index: number) {
+  return SEED_MONTHS[index % SEED_MONTHS.length];
+}
+
+function randomInt(min: number, max: number) {
+  return min + Math.floor(Math.random() * (max - min + 1));
+}
+
+function dateInMonth(year: number, month: number, minDay = 1, maxDay?: number) {
+  const lastDay = new Date(year, month + 1, 0).getDate();
+  const day = randomInt(minDay, maxDay ?? lastDay);
+  return new Date(year, month, day, 8 + randomInt(0, 8), randomInt(0, 59));
+}
+
+function calculateOverallScore(items: CreatedItem[], startOffset: number) {
+  const sectionBuckets = new Map<string, { weight: number; scores: number[] }>();
+  items.forEach((item, index) => {
+    const rating = RATING_PATTERN[(startOffset + index) % RATING_PATTERN.length];
+    const entry = sectionBuckets.get(item.sectionName) ?? { weight: item.sectionWeight, scores: [] };
+    entry.scores.push(RATING_POINTS[rating]);
+    sectionBuckets.set(item.sectionName, entry);
+  });
+  const score = Array.from(sectionBuckets.values()).reduce((sum, section) => {
+    const avg = section.scores.reduce((a, b) => a + b, 0) / section.scores.length;
+    return sum + avg * section.weight;
+  }, 0);
+  return Math.round(score * 10) / 10;
+}
+
+async function insertRow<T>(table: string, data: Record<string, unknown>) {
+  const payload = { id: randomUUID(), ...data };
+  const { data: row, error } = await supabase.from(table).insert(payload).select('*').single();
+  if (error) throw error;
+  return row as T;
+}
+
+async function insertRows(table: string, data: Record<string, unknown>[]) {
+  if (!data.length) return;
+  const payload = data.map((row) => ({ id: randomUUID(), ...row }));
+  const { error } = await supabase.from(table).insert(payload);
+  if (error) throw error;
+}
+
+async function deleteAll(table: string) {
+  const { error } = await supabase.from(table).delete().not('id', 'is', null);
+  if (error) throw error;
+}
+
+async function upsertComment(data: Record<string, unknown>) {
+  const { error } = await supabase
+    .from(TABLES.contractorItemComment)
+    .upsert({ id: randomUUID(), ...data }, {
+      onConflict: 'workOrderId,checklistItemId,contractorId',
+      ignoreDuplicates: false,
+    });
+  if (error) throw error;
+}
+
 async function main() {
-  if (!SUPABASE_URL || !SUPABASE_KEY) throw new Error('Supabase credentials missing');
+  console.log('Starting seed...');
 
-  await prisma.reportLog.deleteMany();
-  await prisma.accessRequestDocument.deleteMany();
-  await prisma.accessRequest.deleteMany();
-  await prisma.auditLog.deleteMany();
-  await prisma.evidence.deleteMany();
-  await prisma.contractorItemComment.deleteMany();
-  await prisma.checklistResponse.deleteMany();
-  await prisma.workOrderChecklist.deleteMany();
-  await prisma.workOrder.deleteMany();
-  await prisma.checklistItem.deleteMany();
-  await prisma.checklistSection.deleteMany();
-  await prisma.checklistTemplate.deleteMany();
-  await prisma.identity.deleteMany();
-  await prisma.site.deleteMany();
-  await prisma.contractor.deleteMany();
-  await prisma.user.deleteMany();
-  console.log('? Cleared all existing data');
+  console.log('Clearing existing data...');
+  await deleteAll(TABLES.reportLog);
+  await deleteAll(TABLES.accessRequestDocument);
+  await deleteAll(TABLES.accessRequest);
+  await deleteAll(TABLES.auditLog);
+  await deleteAll(TABLES.evidence);
+  await deleteAll(TABLES.contractorItemComment);
+  await deleteAll(TABLES.checklistResponse);
+  await deleteAll(TABLES.workOrderChecklist);
+  await deleteAll(TABLES.workOrder);
+  await deleteAll(TABLES.checklistItem);
+  await deleteAll(TABLES.checklistSection);
+  await deleteAll(TABLES.checklistTemplate);
+  await deleteAll(TABLES.identity);
+  await deleteAll(TABLES.site);
+  await deleteAll(TABLES.contractor);
+  await deleteAll(TABLES.user);
+  console.log('✓ Cleared all existing data');
 
-  const hash = await bcrypt.hash(PASSWORD, 10);
-  const users: Record<string, { id: string; displayName: string; role: UserRole }> = {};
-  const contractors: Record<string, { id: string; companyName: string; crNumber: string; email: string }> = {};
-  const sites: Record<string, SiteSpec & { id: string }> = {};
+  console.log('Creating internal users...');
+  const userSeeds = [
+    { displayName: 'Ahmed Al-Balushi', email: 'admin@nama.om', role: 'ADMIN', organisation: 'Nama Water Services', department: 'Compliance' },
+    { displayName: 'Fatima Al-Zadjali', email: 'fatima@nama.om', role: 'ADMIN', organisation: 'Nama Water Services', department: 'Operations' },
+    { displayName: 'Khalid Al-Rashdi', email: 'inspector1@nama.om', role: 'INSPECTOR', organisation: 'Nama Water Services', department: 'Inspection' },
+    { displayName: 'Sara Al-Hinai', email: 'inspector2@nama.om', role: 'INSPECTOR', organisation: 'Nama Water Services', department: 'Inspection' },
+    { displayName: 'Mohammed Al-Farsi', email: 'inspector3@nama.om', role: 'INSPECTOR', organisation: 'Nama Water Services', department: 'Inspection' },
+    { displayName: 'Noor Al-Lawati', email: 'inspector4@nama.om', role: 'INSPECTOR', organisation: 'Nama Water Services', department: 'Inspection' },
+    { displayName: 'Tariq Al-Maqbali', email: 'inspector5@nama.om', role: 'INSPECTOR', organisation: 'Nama Water Services', department: 'Inspection' },
+    { displayName: 'Hessa Al-Balushi', email: 'inspector6@nama.om', role: 'INSPECTOR', organisation: 'Nama Water Services', department: 'Inspection' },
+    { displayName: 'Omar Al-Wahaibi', email: 'inspector7@nama.om', role: 'INSPECTOR', organisation: 'Nama Water Services', department: 'Inspection' },
+    { displayName: 'Salim Al-Wahaibi', email: 'regulator1@nama.om', role: 'REGULATOR', organisation: 'Ministry of Housing', department: 'Water Regulation' },
+    { displayName: 'Huda Al-Siyabi', email: 'regulator2@nama.om', role: 'REGULATOR', organisation: 'Public Authority for Utilities', department: 'Infrastructure' },
+  ] as const;
 
-  for (const spec of [...admins, ...inspectors, ...regulators]) {
-    const user = await prisma.user.create({
-      data: {
-        displayName: spec.displayName,
-        role: spec.role,
-        organisation: spec.organisation ?? null,
-        department: spec.department ?? null,
-        isActive: true,
-        identity: { create: { email: spec.email, password: hash, role: spec.identityRole, isActive: true } },
-      },
-    });
-    users[spec.email] = { id: user.id, displayName: user.displayName, role: user.role };
-  }
-  console.log('? Created 9 users');
-
-  for (const spec of contractorSpecs) {
-    const contractor = await prisma.contractor.create({
-      data: {
-        contractorId: spec.code,
-        companyName: spec.companyName,
-        tradeLicense: spec.tradeLicense,
-        crNumber: spec.crNumber,
-        contactName: spec.contactName,
-        phone: spec.phone,
-        address: spec.address,
-        regions: spec.regions,
-        isActive: true,
-        identity: { create: { email: spec.email, password: hash, role: IdentityRole.CONTRACTOR, isActive: true } },
-      },
-    });
-    contractors[spec.code] = { id: contractor.id, companyName: contractor.companyName, crNumber: contractor.crNumber, email: spec.email };
-  }
-  console.log('? Created 10 contractors');
-
-  for (const spec of siteSpecs) {
-    const site = await prisma.site.create({ data: { name: spec.name, location: spec.location, latitude: spec.latitude, longitude: spec.longitude, region: spec.region, isActive: true } });
-    sites[spec.code] = { ...spec, id: site.id };
-  }
-  console.log('? Created 8 sites');
-
-  const template = (await prisma.checklistTemplate.create({
-    data: {
-      name: 'Nama Standard Inspection Checklist',
+  const users = [];
+  for (const seed of userSeeds) {
+    const user = await insertRow<any>(TABLES.user, {
+      displayName: seed.displayName,
+      role: seed.role,
+      organisation: seed.organisation,
+      department: seed.department,
       isActive: true,
-      version: 1,
-      sections: {
-        create: [
-          { name: 'HSE & Safety', weight: 0.3, order: 1, items: { create: [
-            { text: "Contractor workers' compliance with wearing PPE", weight: 10, isRequired: true, order: 1 },
-            { text: 'Condition of equipment used by the contractor', weight: 10, isRequired: true, order: 2 },
-            { text: 'Overall compliance with Nama HSE standards', weight: 10, isRequired: true, order: 3 },
-          ] } },
-          { name: 'Technical Installation', weight: 0.4, order: 2, items: { create: [
-            { text: 'Compliance of excavation works with specified pipe diameter', weight: 8, isRequired: true, order: 1 },
-            { text: 'Installation of warning tape above pipeline', weight: 7, isRequired: true, order: 2 },
-            { text: 'Sand bedding installation', weight: 8, isRequired: true, order: 3 },
-            { text: 'Ground leveling, soil compaction, removal of rocks', weight: 7, isRequired: true, order: 4 },
-            { text: 'Flushing pipeline after installation and before meter', weight: 9, isRequired: true, order: 5 },
-            { text: 'Installation of marker posts', weight: 5, isRequired: true, order: 6 },
-            { text: 'Installation of identification tag', weight: 4, isRequired: true, order: 7 },
-          ] } },
-          { name: 'Process & Communication', weight: 0.2, order: 3, items: { create: [
-            { text: 'Notification to Nama before/during/after works', weight: 8, isRequired: true, order: 1 },
-            { text: 'Monthly technical report submission', weight: 7, isRequired: true, order: 2 },
-            { text: 'Worker list submission', weight: 5, isRequired: true, order: 3 },
-          ] } },
-          { name: 'Site Closure', weight: 0.1, order: 4, items: { create: [
-            { text: 'Site cleaning and reinstatement', weight: 3, isRequired: true, order: 1 },
-          ] } },
-        ],
-      },
-    },
-    include: { sections: { orderBy: { order: 'asc' }, include: { items: { orderBy: { order: 'asc' } } } } },
-  } as any)) as unknown as {
-    id: string;
-    sections: Array<{ weight: number; name: string; items: Array<{ id: string; order: number; weight: number; text: string }> }>;
-  };
-  console.log('? Created 1 checklist template (14 items)');
-
-  const itemMap: Record<string, { id: string }> = {};
-  for (const section of template.sections) for (const item of section.items) itemMap[`${section.name}:${item.order}`] = { id: item.id };
-  const allItems = template.sections.flatMap((s: { items: Array<{ id: string; order: number; weight: number; text: string }> }) => s.items);
-  const sectionDefs = template.sections.map((s: { weight: number; items: Array<{ id: string }> }) => ({ weight: s.weight, items: s.items.map((i: { id: string }) => i.id) }));
-  const photos = await uploadPhotos();
-
-  const woMap: Record<string, { id: string; contractorId: string | null; inspectorId: string | null; siteCode: string; submittedAt: Date | null }> = {};
-  for (let i = 0; i < workOrders.length; i += 1) {
-    const spec = workOrders[i];
-    const wo = await prisma.workOrder.create({
-      data: {
-        reference: ref(new Date(spec.date), spec.seq),
-        title: spec.title,
-        status: spec.status,
-        priority: spec.priority,
-        siteId: sites[spec.siteCode].id,
-        contractorId: spec.contractorCode ? contractors[spec.contractorCode].id : null,
-        inspectorId: spec.inspectorEmail ? users[spec.inspectorEmail].id : null,
-        createdById: users[admins[i % admins.length].email].id,
-        approvedById: spec.status === WorkOrderStatus.INSPECTION_COMPLETED && spec.inspectorEmail ? users[spec.inspectorEmail].id : null,
-        scheduledDate: dt(spec.scheduledDate),
-        startedAt: dt(spec.startedAt),
-        submittedAt: dt(spec.submittedAt),
-        approvedAt: dt(spec.approvedAt),
-        rejectionReason: spec.rejectionReason ?? null,
-        isLocked: spec.status === WorkOrderStatus.INSPECTION_COMPLETED,
-      },
     });
-    woMap[spec.key] = { id: wo.id, contractorId: wo.contractorId, inspectorId: wo.inspectorId, siteCode: spec.siteCode, submittedAt: wo.submittedAt };
+    await insertRow(TABLES.identity, {
+      email: seed.email,
+      password: PASSWORD_HASH,
+      role: seed.role,
+      isActive: true,
+      userId: user.id,
+    });
+    users.push(user);
   }
-  console.log(`? Created ${workOrders.length} work orders`);
+  const admins = users.filter((u) => u.role === 'ADMIN');
+  const inspectors = users.filter((u) => u.role === 'INSPECTOR');
+  console.log(`✓ Created ${users.length} users`);
 
-  const completedKeys = ['IC1', 'IC2', 'IC3', 'IC4', 'IC5', 'IC6', 'IC7', 'IC8'];
-  for (let wi = 0; wi < completedKeys.length; wi += 1) {
-    const key = completedKeys[wi];
-    const wo = woMap[key];
-    const checklist = await prisma.workOrderChecklist.create({ data: { workOrderId: wo.id, isSubmitted: true, submittedAt: wo.submittedAt ?? new Date(), lastSavedAt: wo.submittedAt ?? new Date(), submittedLatitude: sites[wo.siteCode].latitude, submittedLongitude: sites[wo.siteCode].longitude } });
-    const ratingsByItem: Record<string, RatingValue> = {};
-    for (let ii = 0; ii < allItems.length; ii += 1) {
-      const item = allItems[ii];
-      const rating = ratingPattern[(wi + ii) % ratingPattern.length];
-      ratingsByItem[item.id] = rating;
-      await prisma.checklistResponse.create({
-        data: {
-          checklistId: checklist.id,
-          itemId: item.id,
-          rating,
-          comment: rating === RatingValue.COMPLIANT ? 'Verified and confirmed compliant.' : rating === RatingValue.PARTIAL ? 'Partial compliance â€” follow-up required.' : 'Non-compliant. Contractor must rectify.',
-          createdAt: wo.submittedAt ?? new Date(),
-          updatedAt: wo.submittedAt ?? new Date(),
-        },
+  console.log('Creating checklist template...');
+  const template = await insertRow<any>(TABLES.checklistTemplate, {
+    name: 'Nama Standard Inspection Checklist',
+    description: 'Official Nama Water Services compliance checklist',
+    isActive: true,
+    version: 1,
+  });
+
+  const createdItems: CreatedItem[] = [];
+  for (const sectionSeed of CHECKLIST_DATA) {
+    const section = await insertRow<any>(TABLES.checklistSection, {
+      name: sectionSeed.name,
+      weight: sectionSeed.weight,
+      order: sectionSeed.order,
+      templateId: template.id,
+    });
+    for (const itemSeed of sectionSeed.items) {
+      const item = await insertRow<any>(TABLES.checklistItem, {
+        text: itemSeed.text,
+        isRequired: true,
+        weight: itemSeed.weight,
+        order: itemSeed.order,
+        sectionId: section.id,
       });
-    }
-    const score = Math.round(
-      sectionDefs.reduce(
-        (sum: number, section: { weight: number; items: string[] }) =>
-          sum + (section.items.reduce((s: number, id: string) => s + ratingPoints(ratingsByItem[id]), 0) / (section.items.length || 1)) * section.weight,
-        0
-      ) * 10
-    ) / 10;
-    await prisma.workOrder.update({ where: { id: wo.id }, data: { overallScore: score, complianceBand: scoreBand(score) } });
-  }
-  console.log('? Created checklists + responses for 8 WOs');
-  const evidencePlan = [
-    ['IC1', 'HSE & Safety:1', EvidenceSource.CONTRACTOR, [0, 1]], ['IC1', 'HSE & Safety:2', EvidenceSource.CONTRACTOR, [2, 3]], ['IC1', 'HSE & Safety:1', EvidenceSource.INSPECTOR, [4]],
-    ['IC2', 'Technical Installation:1', EvidenceSource.CONTRACTOR, [5]], ['IC2', 'Technical Installation:2', EvidenceSource.CONTRACTOR, [6, 7]], ['IC2', 'Technical Installation:1', EvidenceSource.INSPECTOR, [8]],
-    ['IC3', 'Technical Installation:3', EvidenceSource.CONTRACTOR, [9, 10]], ['IC3', 'Technical Installation:3', EvidenceSource.INSPECTOR, [11]],
-    ['S1', 'Technical Installation:5', EvidenceSource.CONTRACTOR, [12, 13]], ['S2', 'Technical Installation:4', EvidenceSource.CONTRACTOR, [14]], ['IP1', 'HSE & Safety:1', EvidenceSource.CONTRACTOR, [15, 16]],
-    ['IC4', 'HSE & Safety:3', EvidenceSource.CONTRACTOR, [0, 1]], ['IC5', 'Technical Installation:6', EvidenceSource.CONTRACTOR, [3, 4]], ['IC6', 'Technical Installation:7', EvidenceSource.CONTRACTOR, [6, 7]],
-    ['IC7', 'Process & Communication:1', EvidenceSource.CONTRACTOR, [9, 10]], ['IC8', 'Site Closure:1', EvidenceSource.CONTRACTOR, [0, 1]], ['S3', 'Site Closure:1', EvidenceSource.CONTRACTOR, [3]],
-    ['S4', 'Process & Communication:2', EvidenceSource.CONTRACTOR, [4]], ['IP2', 'Technical Installation:1', EvidenceSource.CONTRACTOR, [5]], ['IP3', 'Technical Installation:2', EvidenceSource.CONTRACTOR, [6]],
-  ] as const;
-  for (const [woKey, itemKey, source, photoIndexes] of evidencePlan) {
-    const wo = woMap[woKey];
-    const site = sites[wo.siteCode];
-    for (let i = 0; i < photoIndexes.length; i += 1) {
-      const photo = photos[photoIndexes[i]];
-      await prisma.evidence.create({
-        data: {
-          workOrderId: wo.id,
-          checklistItemId: itemMap[itemKey].id,
-          type: EvidenceType.PHOTO,
-          source,
-          s3Key: photo.key,
-          s3Url: photo.url,
-          s3Bucket: BUCKET,
-          fileName: photo.fileName,
-          fileSize: photo.fileSize,
-          mimeType: 'image/jpeg',
-          latitude: offset(site.latitude, i),
-          longitude: offset(site.longitude, i),
-          accuracy: 8 + i,
-          locationDisplayName: `${site.location}, Oman`,
-          locationShortName: `${site.name}, Oman`,
-          locationCity: site.location.split(',')[0],
-          locationSuburb: site.name,
-          locationCountry: 'Oman',
-          isLocationFlagged: false,
-          locationDistance: 10 + i * 5,
-          isConfirmed: true,
-          capturedAt: wo.submittedAt ?? new Date(),
-          uploadedAt: wo.submittedAt ?? new Date(),
-        },
+      createdItems.push({
+        id: item.id,
+        text: item.text,
+        sectionName: sectionSeed.name,
+        sectionWeight: sectionSeed.weight,
+        order: itemSeed.order,
       });
     }
   }
-  console.log('? Uploaded evidence records');
+  console.log(`✓ Created 1 checklist template (${createdItems.length} items)`);
 
-  const commentTargets = ['IP1', 'IP2', 'IP3', 'S1', 'S2', 'S3', 'S4'];
-  const commentItems = ['HSE & Safety:1', 'HSE & Safety:2', 'Technical Installation:1', 'Technical Installation:3', 'Site Closure:1'];
-  for (let wi = 0; wi < commentTargets.length; wi += 1) {
-    const wo = woMap[commentTargets[wi]];
-    for (let ci = 0; ci < 3; ci += 1) {
-      await prisma.contractorItemComment.create({ data: { workOrderId: wo.id, checklistItemId: itemMap[commentItems[(wi + ci) % commentItems.length]].id, contractorId: wo.contractorId!, comment: commentSamples[(wi + ci) % commentSamples.length] } });
+  console.log('Creating sites...');
+  const sitesByRegion: Record<string, Array<{ id: string; name: string; lat: number; lng: number }>> = {};
+  for (const region of REGIONS_DATA) {
+    sitesByRegion[region.name] = [];
+    for (const siteSeed of region.sites) {
+      const site = await insertRow<any>(TABLES.site, {
+        name: siteSeed.name,
+        location: siteSeed.location,
+        latitude: siteSeed.lat,
+        longitude: siteSeed.lng,
+        region: region.name,
+        isActive: true,
+      });
+      sitesByRegion[region.name].push({ id: site.id, name: site.name, lat: siteSeed.lat, lng: siteSeed.lng });
     }
   }
-  console.log('? Created contractor comments');
+  console.log(`✓ Created ${Object.values(sitesByRegion).flat().length} sites`);
 
-  for (const key of completedKeys) {
-    const wo = woMap[key];
-    const spec = workOrders.find((entry) => entry.key === key)!;
-    const adminId = users['admin@nama.om'].id;
-    await prisma.auditLog.createMany({
-      data: [
-        { workOrderId: wo.id, userId: adminId, action: 'WORK_ORDER_CREATED', createdAt: dt(`${spec.date}T08:00:00Z`) ?? new Date() },
-        { workOrderId: wo.id, userId: adminId, action: 'CONTRACTOR_ASSIGNED', createdAt: dt(spec.startedAt) ?? new Date(), newValue: { contractorId: wo.contractorId } as object },
-        { workOrderId: wo.id, userId: adminId, action: 'INSPECTOR_ASSIGNED', createdAt: dt(spec.startedAt) ?? new Date(), newValue: { inspectorId: wo.inspectorId } as object },
-        { workOrderId: wo.id, userId: adminId, action: 'WORK_ORDER_SUBMITTED', createdAt: wo.submittedAt ?? new Date(), newValue: { submittedAt: wo.submittedAt } as object },
-        { workOrderId: wo.id, userId: wo.inspectorId, action: 'INSPECTION_COMPLETED', createdAt: dt(spec.approvedAt) ?? new Date() },
-      ],
-    });
+  console.log('Creating contractors...');
+  const contractorsByRegion: Record<string, Array<{ id: string; companyName: string; contractorId: string }>> = {};
+  let contractorCounter = 1;
+  for (const region of REGIONS_DATA) {
+    contractorsByRegion[region.name] = [];
+    for (const companyName of region.contractors) {
+      const seq = String(contractorCounter).padStart(3, '0');
+      const contractor = await insertRow<any>(TABLES.contractor, {
+        contractorId: `CNT-${seq}`,
+        companyName,
+        tradeLicense: `TL-${seq}`,
+        crNumber: `CR-2024-${seq}`,
+        contactName: `Manager ${seq}`,
+        phone: `+968 9${seq}00000`,
+        address: `${region.name}, Oman`,
+        regions: [region.name],
+        isActive: true,
+      });
+      await insertRow(TABLES.identity, {
+        email: `${slug(companyName)}@contractor.om`,
+        password: PASSWORD_HASH,
+        role: 'CONTRACTOR',
+        isActive: true,
+        contractorId: contractor.id,
+      });
+      contractorsByRegion[region.name].push({
+        id: contractor.id,
+        companyName: contractor.companyName,
+        contractorId: contractor.contractorId,
+      });
+      contractorCounter += 1;
+    }
   }
-  console.log('? Created audit logs');
+  const contractorCount = Object.values(contractorsByRegion).flat().length;
+  console.log(`✓ Created ${contractorCount} contractors`);
 
+  console.log('Creating work orders...');
+  const adminUser = admins[0];
+  let workOrderSeq = 1;
+  let workOrderCount = 0;
+  let checklistCount = 0;
+  let evidenceCount = 0;
+  let commentCount = 0;
+  let auditCount = 0;
+
+  for (const region of REGIONS_DATA) {
+    const regionSites = sitesByRegion[region.name];
+    const regionContractors = contractorsByRegion[region.name];
+
+    for (const contractor of regionContractors) {
+      for (let woIndex = 0; woIndex < 10; woIndex += 1) {
+        const status = WO_STATUS_PATTERN[woIndex];
+        const priority = PRIORITIES[woIndex];
+        const slot = monthForWoIndex(woIndex);
+        const inspector = inspectors[workOrderSeq % inspectors.length];
+        const site = regionSites[workOrderSeq % regionSites.length];
+        const scheduledDate = dateInMonth(slot.year, slot.month, 1, 20);
+        const startedAt = ['IN_PROGRESS', 'SUBMITTED', 'INSPECTION_COMPLETED', 'REJECTED'].includes(status)
+          ? dateInMonth(slot.year, slot.month, 2, 12)
+          : null;
+        const submittedAt = ['SUBMITTED', 'INSPECTION_COMPLETED', 'REJECTED'].includes(status)
+          ? dateInMonth(slot.year, slot.month, 10, 25)
+          : null;
+        const approvedAt = status === 'INSPECTION_COMPLETED' ? dateInMonth(slot.year, slot.month, 20, 28) : null;
+        const reference = `WO-${scheduledDate.toISOString().slice(0, 10).replace(/-/g, '')}-${String(workOrderSeq).padStart(4, '0')}`;
+        const overallScore = status === 'INSPECTION_COMPLETED' ? calculateOverallScore(createdItems, workOrderSeq) : null;
+        const complianceBand =
+          overallScore == null ? null : overallScore >= 90 ? 'EXCELLENT' : overallScore >= 75 ? 'GOOD' : overallScore >= 60 ? 'FAIR' : 'POOR';
+
+        const workOrder = await insertRow<any>(TABLES.workOrder, {
+          reference,
+          title: `${site.name} — ${priority} Priority Work`,
+          description: `Compliance inspection work order for ${site.name}. Contractor: ${contractor.companyName}.`,
+          status,
+          priority,
+          scheduledDate: scheduledDate.toISOString(),
+          startedAt: startedAt?.toISOString() ?? null,
+          submittedAt: submittedAt?.toISOString() ?? null,
+          approvedAt: approvedAt?.toISOString() ?? null,
+          isLocked: status === 'INSPECTION_COMPLETED',
+          overallScore,
+          complianceBand: complianceBand as any,
+          rejectionReason: status === 'REJECTED' ? REJECTION_REASONS[workOrderSeq % REJECTION_REASONS.length] : null,
+          siteId: site.id,
+          contractorId: contractor.id,
+          inspectorId: ['ASSIGNED', 'IN_PROGRESS', 'SUBMITTED', 'INSPECTION_COMPLETED', 'REJECTED'].includes(status) ? inspector.id : null,
+          createdById: adminUser.id,
+          approvedById: status === 'INSPECTION_COMPLETED' ? adminUser.id : null,
+        });
+        workOrderCount += 1;
+
+        const actions = ['WORK_ORDER_CREATED'];
+        if (['ASSIGNED', 'IN_PROGRESS', 'SUBMITTED', 'INSPECTION_COMPLETED', 'REJECTED'].includes(status)) actions.push('CONTRACTOR_ASSIGNED');
+        if (['IN_PROGRESS', 'SUBMITTED', 'INSPECTION_COMPLETED', 'REJECTED'].includes(status)) actions.push('INSPECTOR_ASSIGNED');
+        if (['SUBMITTED', 'INSPECTION_COMPLETED', 'REJECTED'].includes(status)) actions.push('WORK_ORDER_SUBMITTED');
+        if (status === 'INSPECTION_COMPLETED') actions.push('INSPECTION_COMPLETED');
+        if (status === 'REJECTED') actions.push('WORK_ORDER_REJECTED');
+
+        for (const action of actions) {
+          await insertRow(TABLES.auditLog, {
+            workOrderId: workOrder.id,
+            userId: adminUser.id,
+            action,
+            newValue: { status },
+            ipAddress: '192.168.1.1',
+            createdAt: scheduledDate.toISOString(),
+          });
+          auditCount += 1;
+        }
+
+        if (status === 'IN_PROGRESS' || status === 'SUBMITTED') {
+          const commentItems = createdItems.slice(0, status === 'IN_PROGRESS' ? 2 : 3);
+          for (const item of commentItems) {
+            await insertRow(TABLES.contractorItemComment, {
+              workOrderId: workOrder.id,
+              checklistItemId: item.id,
+              contractorId: contractor.id,
+              comment: CONTRACTOR_COMMENTS[commentCount % CONTRACTOR_COMMENTS.length],
+              updatedAt: new Date().toISOString(),
+            });
+            commentCount += 1;
+          }
+        }
+
+        if (status === 'SUBMITTED') {
+          const submittedEvidence = createdItems.map((item) => {
+            const photo = nextPhoto();
+            return {
+              workOrderId: workOrder.id,
+              checklistItemId: item.id,
+              type: 'PHOTO' as const,
+              source: 'CONTRACTOR' as const,
+              s3Key: photo.key,
+              s3Url: photo.url,
+              s3Bucket: BUCKET,
+              fileName: photo.key.split('/').pop()!,
+              fileSize: 150000 + randomInt(0, 200000),
+              mimeType: 'image/jpeg',
+              latitude: site.lat + (Math.random() - 0.5) * 0.001,
+              longitude: site.lng + (Math.random() - 0.5) * 0.001,
+              locationDisplayName: site.name,
+              locationShortName: region.name,
+              isLocationFlagged: false,
+              locationDistance: 0,
+              isConfirmed: true,
+              capturedAt: dateInMonth(slot.year, slot.month, 5, 15),
+            };
+          });
+          await insertRows(TABLES.evidence, submittedEvidence.map((row) => ({
+            ...row,
+            capturedAt: row.capturedAt.toISOString(),
+          })));
+          evidenceCount += submittedEvidence.length;
+        }
+
+        if (status === 'INSPECTION_COMPLETED') {
+          const checklist = await insertRow<any>(TABLES.workOrderChecklist, {
+            workOrderId: workOrder.id,
+            isSubmitted: true,
+            submittedAt: submittedAt!.toISOString(),
+            lastSavedAt: submittedAt!.toISOString(),
+            submittedLatitude: site.lat + (Math.random() - 0.5) * 0.001,
+            submittedLongitude: site.lng + (Math.random() - 0.5) * 0.001,
+          });
+          checklistCount += 1;
+
+          const responses = [];
+          const contractorEvidenceRows = [];
+          const inspectorEvidenceRows = [];
+          for (let itemIndex = 0; itemIndex < createdItems.length; itemIndex += 1) {
+            const item = createdItems[itemIndex];
+            const rating = RATING_PATTERN[(workOrderSeq + itemIndex) % RATING_PATTERN.length];
+            responses.push({
+              checklistId: checklist.id,
+              itemId: item.id,
+              rating,
+              comment: INSPECTOR_COMMENTS[rating][(workOrderSeq + itemIndex) % INSPECTOR_COMMENTS[rating].length],
+            });
+
+            const contractorPhotoCount = 1 + ((workOrderSeq + itemIndex) % 2);
+            for (let p = 0; p < contractorPhotoCount; p += 1) {
+              const photo = nextPhoto();
+              contractorEvidenceRows.push({
+                workOrderId: workOrder.id,
+                checklistItemId: item.id,
+                type: 'PHOTO' as const,
+                source: 'CONTRACTOR' as const,
+                s3Key: photo.key,
+                s3Url: photo.url,
+                s3Bucket: BUCKET,
+                fileName: photo.key.split('/').pop()!,
+                fileSize: 150000 + randomInt(0, 300000),
+                mimeType: 'image/jpeg',
+                latitude: site.lat + (Math.random() - 0.5) * 0.001,
+                longitude: site.lng + (Math.random() - 0.5) * 0.001,
+                locationDisplayName: site.name,
+                locationShortName: region.name,
+                isLocationFlagged: false,
+                locationDistance: 0,
+                isConfirmed: true,
+                capturedAt: dateInMonth(slot.year, slot.month, 5, 15),
+              });
+            }
+
+            const inspectorPhoto = nextPhoto();
+            inspectorEvidenceRows.push({
+              workOrderId: workOrder.id,
+              checklistItemId: item.id,
+              type: 'PHOTO' as const,
+              source: 'INSPECTOR' as const,
+              s3Key: inspectorPhoto.key,
+              s3Url: inspectorPhoto.url,
+              s3Bucket: BUCKET,
+              fileName: inspectorPhoto.key.split('/').pop()!,
+              fileSize: 120000 + randomInt(0, 200000),
+              mimeType: 'image/jpeg',
+              latitude: site.lat + (Math.random() - 0.5) * 0.001,
+              longitude: site.lng + (Math.random() - 0.5) * 0.001,
+              locationDisplayName: site.name,
+              locationShortName: region.name,
+              isLocationFlagged: false,
+              locationDistance: 0,
+              isConfirmed: true,
+              capturedAt: dateInMonth(slot.year, slot.month, 18, 28),
+            });
+          }
+
+          await insertRows(
+            TABLES.checklistResponse,
+            responses
+          );
+          await insertRows(
+            TABLES.evidence,
+            contractorEvidenceRows.map((row) => ({
+              ...row,
+              capturedAt: row.capturedAt.toISOString(),
+            }))
+          );
+          await insertRows(
+            TABLES.evidence,
+            inspectorEvidenceRows.map((row) => ({
+              ...row,
+              capturedAt: row.capturedAt.toISOString(),
+            }))
+          );
+          evidenceCount += contractorEvidenceRows.length + inspectorEvidenceRows.length;
+
+          for (const item of createdItems.slice(0, 2)) {
+            await upsertComment({
+              workOrderId: workOrder.id,
+              checklistItemId: item.id,
+              contractorId: contractor.id,
+              comment: CONTRACTOR_COMMENTS[commentCount % CONTRACTOR_COMMENTS.length],
+              updatedAt: new Date().toISOString(),
+            });
+            commentCount += 1;
+          }
+        }
+
+        workOrderSeq += 1;
+      }
+    }
+  }
+
+  console.log(`✓ Created ${workOrderCount} work orders`);
+  console.log(`✓ Created ${checklistCount} completed checklists`);
+  console.log(`✓ Created ${evidenceCount} evidence records`);
+  console.log(`✓ Created ${commentCount} contractor comments`);
+  console.log(`✓ Created ${auditCount} audit logs`);
+
+  console.log('Creating access requests...');
   const accessRequests = [
-    { requestId: 'REQ-20260308-001', role: 'CONTRACTOR', contactName: 'Hassan Al-Noor', email: contractors['CNT-001'].email, phone: '+968 9100 0001', companyName: contractors['CNT-001'].companyName, tradeLicense: 'TL-2024-001', crNumber: contractors['CNT-001'].crNumber, status: 'APPROVED', contractorId: contractors['CNT-001'].id, reviewNotes: 'Approved and contractor account activated.' },
-    { requestId: 'REQ-20260308-002', role: 'REGULATOR', contactName: 'Salim Al-Wahaibi', email: 'regulator1@nama.om', phone: '+968 9200 1001', organisation: 'Authority for Public Services Regulation', department: 'Water Compliance', status: 'APPROVED', userId: users['regulator1@nama.om'].id, reviewNotes: 'Approved as regulator user.' },
-    { requestId: 'REQ-20260308-003', role: 'CONTRACTOR', contactName: 'Rustam Al-Balushi', email: 'rustam@newcontractor.om', phone: '+968 9233 4455', companyName: 'Al Rustam Engineering', tradeLicense: 'TL-2025-011', crNumber: 'CR-2025-011', status: 'PENDING' },
-    { requestId: 'REQ-20260308-004', role: 'REGULATOR', contactName: 'Zainab Al-Kindi', email: 'zainab@regulator.gov.om', phone: '+968 9244 5566', organisation: 'Ministry of Housing', department: 'Field Oversight', status: 'PENDING' },
-    { requestId: 'REQ-20260308-005', role: 'CONTRACTOR', contactName: 'Unknown Applicant', email: 'unknown@test.com', phone: '+968 9255 6677', companyName: 'Unknown Works', tradeLicense: 'TL-2025-999', crNumber: 'CR-2025-999', status: 'REJECTED', reviewNotes: 'Incomplete documentation provided. Trade license could not be verified.' },
-  ] as const;
-  for (const req of accessRequests) {
-    const ar = await prisma.accessRequest.create({
-      data: {
-        requestId: req.requestId,
-        role: req.role as 'CONTRACTOR' | 'REGULATOR',
-        contactName: req.contactName,
-        email: req.email,
-        phone: req.phone,
-        companyName: 'companyName' in req ? req.companyName ?? null : null,
-        tradeLicense: 'tradeLicense' in req ? req.tradeLicense ?? null : null,
-        crNumber: 'crNumber' in req ? req.crNumber ?? null : null,
-        organisation: 'organisation' in req ? req.organisation ?? null : null,
-        department: 'department' in req ? req.department ?? null : null,
-        status: req.status as 'PENDING' | 'APPROVED' | 'REJECTED',
-        contractorId: 'contractorId' in req ? req.contractorId ?? null : null,
-        userId: 'userId' in req ? req.userId ?? null : null,
-        reviewedAt: req.status === 'PENDING' ? null : new Date('2026-03-01T10:00:00Z'),
-        reviewNotes: 'reviewNotes' in req ? req.reviewNotes ?? null : null,
-      },
+    {
+      requestId: 'REQ-2026-001',
+      role: 'CONTRACTOR' as const,
+      contactName: 'Rustam Al-Balushi',
+      email: 'rustam@newcontractor.om',
+      phone: '+968 9200 0001',
+      companyName: 'Al Rustam Engineering LLC',
+      tradeLicense: 'TL-NEW-001',
+      crNumber: 'CR-2025-101',
+      status: 'PENDING' as const,
+      docs: ['Trade License', 'CR Certificate', 'Company Profile'],
+    },
+    {
+      requestId: 'REQ-2026-002',
+      role: 'CONTRACTOR' as const,
+      contactName: 'Mona Al-Harthi',
+      email: 'mona@alharthy.om',
+      phone: '+968 9200 0002',
+      companyName: 'Al Harthy Infrastructure',
+      tradeLicense: 'TL-NEW-002',
+      crNumber: 'CR-2025-102',
+      status: 'PENDING' as const,
+      docs: ['Trade License', 'CR Certificate'],
+    },
+    {
+      requestId: 'REQ-2026-003',
+      role: 'CONTRACTOR' as const,
+      contactName: 'Jaber Al-Amri',
+      email: 'jaber@alamri.om',
+      phone: '+968 9200 0003',
+      companyName: 'Al Amri Water Works',
+      tradeLicense: 'TL-NEW-003',
+      crNumber: 'CR-2025-103',
+      status: 'PENDING' as const,
+      docs: ['Trade License', 'CR Certificate', 'Bank Statement'],
+    },
+    {
+      requestId: 'REQ-2026-004',
+      role: 'REGULATOR' as const,
+      contactName: 'Zainab Al-Kindi',
+      email: 'zainab@housing.gov.om',
+      phone: '+968 9200 0004',
+      organisation: 'Ministry of Housing',
+      department: 'Water Infrastructure',
+      status: 'PENDING' as const,
+      docs: ['Government ID', 'Authorization Letter'],
+    },
+    {
+      requestId: 'REQ-2025-010',
+      role: 'CONTRACTOR' as const,
+      contactName: 'Hassan Al-Noor',
+      email: 'hassan.approved@contractor.om',
+      phone: '+968 9200 0010',
+      companyName: 'Al Noor Approved Co.',
+      tradeLicense: 'TL-APR-001',
+      crNumber: 'CR-2024-201',
+      status: 'APPROVED' as const,
+      reviewNotes: 'All documents verified. Access granted.',
+      docs: ['Trade License', 'CR Certificate', 'Company Profile'],
+    },
+    {
+      requestId: 'REQ-2025-011',
+      role: 'REGULATOR' as const,
+      contactName: 'Salim Approved',
+      email: 'salim.approved@gov.om',
+      phone: '+968 9200 0011',
+      organisation: 'Public Authority',
+      department: 'Regulation',
+      status: 'APPROVED' as const,
+      reviewNotes: 'Verified government employee.',
+      docs: ['Government ID'],
+    },
+    {
+      requestId: 'REQ-2025-020',
+      role: 'CONTRACTOR' as const,
+      contactName: 'Unknown Applicant',
+      email: 'unknown@test.om',
+      phone: '+968 9200 0020',
+      companyName: 'Test Company',
+      tradeLicense: 'TL-000',
+      crNumber: 'CR-000',
+      status: 'REJECTED' as const,
+      reviewNotes: 'Incomplete documentation. Trade license could not be verified.',
+      docs: ['Trade License'],
+    },
+    {
+      requestId: 'REQ-2025-021',
+      role: 'CONTRACTOR' as const,
+      contactName: 'Invalid Applicant',
+      email: 'invalid@test.om',
+      phone: '+968 9200 0021',
+      companyName: 'Invalid Co.',
+      tradeLicense: 'TL-INV',
+      crNumber: 'CR-INV',
+      status: 'REJECTED' as const,
+      reviewNotes: 'Company registration number not valid.',
+      docs: ['CR Certificate'],
+    },
+  ];
+
+  for (const seed of accessRequests) {
+    const accessRequest = await insertRow<any>(TABLES.accessRequest, {
+      requestId: seed.requestId,
+      role: seed.role,
+      contactName: seed.contactName,
+      email: seed.email,
+      phone: seed.phone,
+      companyName: 'companyName' in seed ? seed.companyName ?? null : null,
+      tradeLicense: 'tradeLicense' in seed ? seed.tradeLicense ?? null : null,
+      crNumber: 'crNumber' in seed ? seed.crNumber ?? null : null,
+      organisation: 'organisation' in seed ? seed.organisation ?? null : null,
+      department: 'department' in seed ? seed.department ?? null : null,
+      status: seed.status,
+      reviewedAt: seed.status === 'PENDING' ? null : '2025-12-01T09:00:00.000Z',
+      reviewNotes: 'reviewNotes' in seed ? seed.reviewNotes ?? null : null,
+      updatedAt: new Date().toISOString(),
     });
-    const docs = req.role === 'CONTRACTOR' ? ['Trade License', 'CR Document'] : ['Government ID', 'Authorization Letter'];
-    for (const name of docs) {
-      await prisma.accessRequestDocument.create({ data: { accessRequestId: ar.id, name, status: req.status === 'APPROVED' ? 'VERIFIED' : req.status === 'REJECTED' ? 'REJECTED' : 'NOT_VERIFIED' } });
-    }
+
+    await insertRows(
+      TABLES.accessRequestDocument,
+      seed.docs.map((name) => ({
+        accessRequestId: accessRequest.id,
+        name,
+        status: seed.status === 'APPROVED' ? 'VERIFIED' : seed.status === 'REJECTED' ? 'REJECTED' : 'NOT_VERIFIED',
+        fileUrl: null,
+        updatedAt: new Date().toISOString(),
+      }))
+    );
   }
-  console.log('? Created access requests');
-  console.log('? Seed complete');
+  console.log(`✓ Created ${accessRequests.length} access requests`);
+
+  console.log('Creating sample report logs...');
+  const reportLogs = [
+    {
+      reportType: 'Performance Summary',
+      subject: 'All Regions',
+      period: 'Oct 2025 - Mar 2026',
+      fileKey: 'reports/sample/performance-summary-all-regions.pdf',
+      filters: { years: [2025, 2026], months: [10, 11, 12, 1, 2, 3] },
+    },
+    {
+      reportType: 'Performance Summary',
+      subject: 'Muscat',
+      period: 'Jan 2026 - Mar 2026',
+      fileKey: 'reports/sample/performance-summary-muscat.pdf',
+      filters: { years: [2026], months: [1, 2, 3], regions: ['Muscat'] },
+    },
+    {
+      reportType: 'Contractor Performance',
+      subject: 'Al Noor Construction LLC',
+      period: '2026',
+      fileKey: 'reports/sample/contractor-performance-al-noor.pdf',
+      filters: { years: [2026], contractorName: 'Al Noor Construction LLC' },
+    },
+  ];
+
+  for (const log of reportLogs) {
+    await insertRow(TABLES.reportLog, {
+      reportType: log.reportType,
+      subject: log.subject,
+      period: log.period,
+      generatedBy: adminUser.id,
+      generatedAt: '2026-03-01T12:00:00.000Z',
+      fileKey: log.fileKey,
+      fileUrl: `https://placeholder.url/${log.fileKey}`,
+      fileSize: 45000,
+      filters: log.filters,
+    });
+  }
+  console.log(`✓ Created ${reportLogs.length} report logs`);
+
+  console.log('');
+  console.log('═══════════════════════════════');
+  console.log('SEED COMPLETE');
+  console.log('═══════════════════════════════');
+  console.log(`Users: ${users.length}`);
+  console.log(`Contractors: ${contractorCount}`);
+  console.log(`Sites: ${Object.values(sitesByRegion).flat().length}`);
+  console.log(`Work Orders: ${workOrderCount}`);
+  console.log(`Evidence: ${evidenceCount}`);
+  console.log(`Comments: ${commentCount}`);
+  console.log(`Access Requests: ${accessRequests.length}`);
+  console.log('');
+  console.log('Test logins (password: mobile123):');
+  console.log('  Admin: admin@nama.om');
+  console.log('  Inspector: inspector1@nama.om');
+  console.log('  Contractor: musandam.civil.works.llc@contractor.om');
+  console.log('  Regulator: regulator1@nama.om');
 }
 
-main().catch((error) => {
-  console.error(error);
-  process.exit(1);
-}).finally(async () => {
-  await prisma.$disconnect();
-});
+main()
+  .catch(async (err) => {
+    console.error('Seed failed:', err);
+    process.exit(1);
+  })
+  .finally(() => undefined);

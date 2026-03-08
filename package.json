@@ -5,12 +5,12 @@
   "main": "dist/server.js",
   "scripts": {
     "dev": "ts-node-dev --respawn --transpile-only src/server.ts",
-    "build": "prisma generate && tsc",
+    "build": "prisma generate && tsc && node scripts/copy-assets.js",
     "start": "node dist/server.js",
     "db:migrate": "prisma migrate dev",
     "db:generate": "prisma generate",
     "db:push": "prisma db push",
-    "db:seed": "ts-node prisma/seed.ts",
+    "db:seed": "npx prisma db seed",
     "db:fix-checklist": "ts-node prisma/fix-checklist.ts",
     "db:backup": "tsx prisma/backup.ts",
     "db:restore": "tsx prisma/restore.ts",
@@ -26,7 +26,7 @@
     "format": "prettier --write src/**/*.ts"
   },
   "prisma": {
-    "seed": "ts-node prisma/seed.ts"
+    "seed": "tsx prisma/seed.ts"
   },
   "dependencies": {
     "@prisma/client": "^5.0.0",
