@@ -91,31 +91,28 @@ export const upsertComment = async (req: Request, res: Response, next: NextFunct
 export const getCommentsForWorkOrder = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { workOrderId } = req.params;
-    const contractorId = req.user?.contractorId;
-    const where: {
-      workOrderId: string;
-      contractorId?: string;
-    } = { workOrderId };
-
-    if (contractorId) {
-      where.contractorId = contractorId;
-    }
 
     const comments = await prisma.contractorItemComment.findMany({
-      where,
+      where: { workOrderId },
+      select: {
+        id: true,
+        workOrderId: true,
+        checklistItemId: true,
+        contractorId: true,
+        comment: true,
+        createdAt: true,
+        updatedAt: true,
+      },
       orderBy: { createdAt: 'asc' },
     });
 
-    const commentMap: Record<string, { id: string; comment: string; updatedAt: Date }> = {};
-    for (const entry of comments) {
-      commentMap[entry.checklistItemId] = {
-        id: entry.id,
-        comment: entry.comment,
-        updatedAt: entry.updatedAt,
-      };
-    }
+    console.log('[Comments Fetch] Query:', {
+      workOrderId,
+      resultCount: comments.length,
+      itemIds: comments.map((entry) => entry.checklistItemId),
+    });
 
-    return res.json({ data: commentMap });
+    return res.json({ comments });
   } catch (err) {
     return next(err);
   }

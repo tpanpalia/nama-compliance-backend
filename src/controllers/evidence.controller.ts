@@ -32,6 +32,30 @@ export const listEvidenceHandler = async (req: Request, res: Response, next: Nex
 
 export const getEvidenceByWorkOrder = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
+    const evidence = await listEvidence({
+      workOrderId: req.params.workOrderId,
+      actor: {
+        role: req.user?.role,
+        contractorId: req.user?.contractorId,
+        dbUserId: req.user?.dbUserId,
+      },
+    });
+
+    console.log('[Evidence Fetch] Query:', {
+      workOrderId: req.params.workOrderId,
+      resultCount: evidence.length,
+      sources: evidence.map((item) => item.source),
+      itemIds: evidence.map((item) => item.checklistItemId),
+    });
+
+    res.json({ evidence });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const getGroupedEvidenceByWorkOrder = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
     const data = await listEvidenceForWorkOrder(req.params.workOrderId, {
       role: req.user?.role,
       contractorId: req.user?.contractorId,
@@ -45,6 +69,15 @@ export const getEvidenceByWorkOrder = async (req: Request, res: Response, next: 
 
 export const requestPresignedUpload = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
+    console.log('[Evidence Upload] Body:', {
+      workOrderId: req.params.workOrderId,
+      checklistItemId: req.body.checklistItemId,
+      source: req.user?.role === 'CONTRACTOR' ? 'CONTRACTOR' : 'INSPECTOR',
+      capturedAt: req.body.capturedAt,
+      latitude: req.body.latitude,
+      longitude: req.body.longitude,
+    });
+
     const source = req.user?.role === 'CONTRACTOR' ? EvidenceSource.CONTRACTOR : EvidenceSource.INSPECTOR;
     const data = await requestUpload({
       workOrderId: req.params.workOrderId,
@@ -65,6 +98,14 @@ export const requestPresignedUpload = async (req: Request, res: Response, next: 
       },
     });
 
+    console.log('[Evidence Upload] Created row:', {
+      id: data.evidenceId,
+      workOrderId: req.params.workOrderId,
+      checklistItemId: req.body.checklistItemId ?? null,
+      source,
+      s3Url: null,
+    });
+
     res.status(201).json({ data, message: 'Upload URL generated successfully' });
   } catch (error) {
     next(error);
@@ -74,6 +115,13 @@ export const requestPresignedUpload = async (req: Request, res: Response, next: 
 export const confirmEvidenceUpload = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const data = await confirmUpload(req.body.evidenceId, req.body.key);
+    console.log('[Evidence Upload] Confirmed row:', {
+      id: data.id,
+      workOrderId: data.workOrderId,
+      checklistItemId: data.checklistItemId,
+      source: data.source,
+      s3Url: data.s3Url,
+    });
     res.json({ data, message: 'Upload confirmed successfully' });
   } catch (error) {
     next(error);

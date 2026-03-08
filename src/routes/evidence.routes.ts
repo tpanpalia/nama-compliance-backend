@@ -4,6 +4,7 @@ import {
   confirmEvidenceUpload,
   deleteEvidenceHandler,
   getEvidenceByWorkOrder,
+  getGroupedEvidenceByWorkOrder,
   listEvidenceHandler,
   requestPresignedUpload,
 } from '../controllers/evidence.controller';
@@ -58,7 +59,8 @@ router.get('/', authorize(UserRole.ADMIN, UserRole.INSPECTOR, EXTERNAL_USER_ROLE
  *       200:
  *         description: Evidence grouped by source (INSPECTOR vs CONTRACTOR)
  */
-router.get('/work-orders/:workOrderId/evidence', authorize(UserRole.ADMIN, UserRole.INSPECTOR, EXTERNAL_USER_ROLES.CONTRACTOR, UserRole.REGULATOR), validate({ params: workOrderIdParamSchema }), getEvidenceByWorkOrder);
+router.get('/work-order/:workOrderId', authorize(UserRole.ADMIN, UserRole.INSPECTOR, EXTERNAL_USER_ROLES.CONTRACTOR, UserRole.REGULATOR), validate({ params: workOrderIdParamSchema }), getEvidenceByWorkOrder);
+router.get('/work-orders/:workOrderId/evidence', authorize(UserRole.ADMIN, UserRole.INSPECTOR, EXTERNAL_USER_ROLES.CONTRACTOR, UserRole.REGULATOR), validate({ params: workOrderIdParamSchema }), getGroupedEvidenceByWorkOrder);
 
 /**
  * @swagger

@@ -2,8 +2,10 @@ import { NextFunction, Request, Response } from 'express';
 import { Prisma } from '@prisma/client';
 import { prisma } from '../config/database';
 import * as ReportsService from '../services/reports.service';
+import { fetchPerformanceSummaryData } from '../services/performanceSummaryReport.service';
 import { uploadReportPDF } from '../services/storage.service';
 import { buildSimplePdf, generateWorkOrderInspectionPdf } from '../utils/simplePdf';
+import { generatePerformanceSummaryPDF } from '../utils/performanceSummaryPDF';
 
 const toArray = <T>(value: T | T[] | undefined | null): T[] => {
   if (value == null) return [];
@@ -344,10 +346,39 @@ export const generateReport = async (req: Request, res: Response, next: NextFunc
         break;
       }
       case 'performance-summary': {
-        const result = await ReportsService.generatePerformanceSummaryReport(contractorIds, years, months, regions);
-        reportData = result.data;
-        contractors = result.contractors as unknown as Array<{ companyName: string }>;
-        break;
+        const data = await fetchPerformanceSummaryData({
+          years,
+          months,
+          regions,
+        });
+
+        const pdfBuffer = await generatePerformanceSummaryPDF(data);
+        const filename = `Performance_Summary_${sanitizeFilenamePart(data.filters.periodLabel)}.pdf`;
+
+        try {
+          const uploaded = await uploadReportPDF(pdfBuffer, 'performance-summary', filename);
+          if (req.user?.dbUserId) {
+            await prisma.reportLog.create({
+              data: {
+                reportType: 'Performance Summary',
+                subject: data.filters.periodLabel,
+                period: data.filters.years.join(', '),
+                generatedBy: req.user.dbUserId,
+                fileKey: uploaded.key,
+                fileUrl: uploaded.url,
+                fileSize: uploaded.size,
+                filters: req.body,
+              },
+            });
+          }
+        } catch (error) {
+          console.error('Report log failed:', error);
+        }
+
+        res.setHeader('Content-Type', 'application/pdf');
+        res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+        res.setHeader('Content-Length', pdfBuffer.length);
+        return res.end(pdfBuffer);
       }
       default:
         return res.status(400).json({ error: 'Unsupported reportType' });
