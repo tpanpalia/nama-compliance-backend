@@ -4,6 +4,7 @@ import { prisma } from '../config/database';
 import { toNumberArray, toStringArray } from '../utils/queryFilters';
 import { getOverdueFilter } from '../utils/queryHelpers';
 import { AppError } from '../utils/AppError';
+import { generateAccessibleObjectUrl } from './storage.service';
 
 const OVERDUE_THRESHOLD_DAYS = 3;
 
@@ -228,6 +229,13 @@ export async function getWorkOrderById(
     },
   });
 
+  const hydratedEvidence = await Promise.all(
+    (wo.evidence || []).map(async (entry) => ({
+      ...entry,
+      s3Url: await generateAccessibleObjectUrl(entry.s3Key, entry.s3Url),
+    }))
+  );
+
   const sectionMap: Record<
     string,
     {
@@ -276,11 +284,11 @@ export async function getWorkOrderById(
         responseId: response.id,
         rating: response.rating || undefined,
         comment: response.comment || undefined,
-        evidence: (wo.evidence || []).map((e) => ({
+        evidence: hydratedEvidence.map((e) => ({
           id: e.id,
           type: e.type,
           source: e.source,
-          fileUrl: (e as any).s3Url || null,
+          fileUrl: e.s3Url || null,
           lat: e.latitude,
           lng: e.longitude,
           capturedAt: e.capturedAt,
@@ -298,6 +306,7 @@ export async function getWorkOrderById(
 
   return {
     ...wo,
+    evidence: hydratedEvidence,
     site: wo.site ? { name: wo.site.name, address: wo.site.location } : null,
     displayStatus: computeDisplayStatus(wo),
     locationFlaggedCount,
@@ -348,6 +357,13 @@ export async function getWorkOrderChecklistDetail(id: string) {
     orderBy: { createdAt: 'asc' },
   });
 
+  const hydratedEvidence = await Promise.all(
+    allEvidence.map(async (entry) => ({
+      ...entry,
+      s3Url: await generateAccessibleObjectUrl(entry.s3Key, entry.s3Url),
+    }))
+  );
+
   const contractorComments = await prisma.contractorItemComment.findMany({
     where: { workOrderId: id },
   });
@@ -371,7 +387,7 @@ export async function getWorkOrderChecklistDetail(id: string) {
     }
   > = {};
 
-  for (const evidence of allEvidence) {
+  for (const evidence of hydratedEvidence) {
     if (!evidence.checklistItemId) continue;
     if (!evidenceByItem[evidence.checklistItemId]) {
       evidenceByItem[evidence.checklistItemId] = {

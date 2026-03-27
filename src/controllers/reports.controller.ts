@@ -2,6 +2,7 @@ import { NextFunction, Request, Response } from 'express';
 import { Prisma } from '@prisma/client';
 import { prisma } from '../config/database';
 import * as ReportsService from '../services/reports.service';
+import { generateAccessibleObjectUrl } from '../services/storage.service';
 
 function isMissingReportLogTableError(error: unknown): boolean {
   return (
@@ -95,10 +96,12 @@ export const generateReport = async (req: Request, res: Response, next: NextFunc
       });
     }
 
+    const fileUrl = await generateAccessibleObjectUrl(undefined, reportLog.fileUrl);
+
     return res.status(200).json({
       success: true,
       reportType: reportTypeName,
-      fileUrl: reportLog.fileUrl,
+      fileUrl,
       fileName:
         type === 'performance-summary'
           ? 'NAMA_Performance_Summary_Report.pdf'
@@ -143,18 +146,20 @@ export const getRecentReports = async (req: Request, res: Response, next: NextFu
       throw error;
     }
 
-    return res.json({
-      data: reports.map((report) => ({
+    const data = await Promise.all(
+      reports.map(async (report) => ({
         id: report.id,
         reportType: report.reportType,
         subject: report.subject,
         period: report.period,
         generatedBy: report.generatedByUser.displayName || report.generatedByUser.identity?.email || report.generatedBy,
         generatedAt: report.generatedAt,
-        fileUrl: report.fileUrl,
+        fileUrl: await generateAccessibleObjectUrl(undefined, report.fileUrl),
         fileSize: report.fileSize,
-      })),
-    });
+      }))
+    );
+
+    return res.json({ data });
   } catch (err) {
     return next(err);
   }

@@ -2,6 +2,7 @@ import { WorkOrderStatus } from '@prisma/client';
 import { z } from 'zod';
 import { prisma } from '../config/database';
 import { AppError } from '../utils/AppError';
+import { generateAccessibleObjectUrl } from './storage.service';
 
 export const WorkOrderReportSchema = z.object({
   workOrderId: z.string().uuid(),
@@ -133,6 +134,24 @@ export async function getWorkOrderReportData(workOrderId: string) {
     throw new AppError('Only completed inspections can generate inspection reports', 400);
   }
 
+  const contractorEvidence = await Promise.all(
+    wo.evidence
+      .filter((e) => e.source === 'CONTRACTOR')
+      .map(async (e) => ({
+        id: e.id,
+        fileUrl: await generateAccessibleObjectUrl(e.s3Key, null),
+        capturedAt: e.capturedAt?.toISOString() || null,
+      }))
+  );
+  const inspectorEvidence = await Promise.all(
+    wo.evidence
+      .filter((e) => e.source === 'INSPECTOR')
+      .map(async (e) => ({
+        id: e.id,
+        fileUrl: await generateAccessibleObjectUrl(e.s3Key, null),
+      }))
+  );
+
   const sectionMap: Record<
     string,
     {
@@ -168,20 +187,6 @@ export async function getWorkOrderReportData(workOrderId: string) {
       }
 
       // Current schema stores evidence at work-order level, not per response.
-      const contractorEvidence = wo.evidence
-        .filter((e) => e.source === 'CONTRACTOR')
-        .map((e) => ({
-          id: e.id,
-          fileUrl: e.s3Key || null,
-          capturedAt: e.capturedAt?.toISOString() || null,
-        }));
-      const inspectorEvidence = wo.evidence
-        .filter((e) => e.source === 'INSPECTOR')
-        .map((e) => ({
-          id: e.id,
-          fileUrl: e.s3Key || null,
-        }));
-
       sectionMap[s.id].items.push({
         itemId: r.item.id,
         itemText: r.item.text,

@@ -12,6 +12,7 @@ import { reverseGeocode } from '../utils/reverseGeocode';
 import {
   buildChecklistEvidenceKey,
   deleteObject,
+  generateAccessibleObjectUrl,
   generateObjectUrl,
   generateUploadPresignedUrl,
   getObjectMetadata,
@@ -22,6 +23,13 @@ type EvidenceActor = {
   contractorId?: string;
   dbUserId?: string;
 };
+
+const hydrateEvidenceAccess = async <T extends { s3Key: string; s3Url?: string | null }>(
+  item: T
+): Promise<T & { s3Url: string | null }> => ({
+  ...item,
+  s3Url: await generateAccessibleObjectUrl(item.s3Key, item.s3Url ?? null),
+});
 
 const allowedWorkOrderStatuses = (source: EvidenceSource): string[] =>
   source === EvidenceSource.CONTRACTOR ? ['ASSIGNED', 'IN_PROGRESS'] : ['ASSIGNED', 'IN_PROGRESS', 'SUBMITTED'];
@@ -113,17 +121,22 @@ export const listEvidence = async (filters: {
 
   const locationMap = new Map(locationRows.map((row) => [row.id, row]));
 
-  return evidence.map((item) => {
+  const hydratedEvidence = await Promise.all(
+    evidence.map(async (item) => {
     const location = locationMap.get(item.id);
     return {
       ...item,
+      s3Url: await generateAccessibleObjectUrl(item.s3Key, item.s3Url),
       locationDisplayName: location?.locationDisplayName ?? null,
       locationShortName: location?.locationShortName ?? null,
       locationCity: location?.locationCity ?? null,
       locationSuburb: location?.locationSuburb ?? null,
       locationCountry: location?.locationCountry ?? null,
     };
-  });
+    })
+  );
+
+  return hydratedEvidence;
 };
 
 export const listEvidenceForWorkOrder = async (workOrderId: string, actor?: EvidenceActor) => {
@@ -253,7 +266,7 @@ export const requestUpload = async (params: {
     type: params.fileType,
     s3Key,
     s3Url: null,
-    s3Bucket: process.env.SUPABASE_STORAGE_BUCKET || '',
+    s3Bucket: process.env.S3_BUCKET_NAME || '',
     fileName: params.fileName,
     fileSize: params.fileSize,
     mimeType: params.contentType,
@@ -322,7 +335,7 @@ export const confirmUpload = async (evidenceId: string, key?: string) => {
   const objectKey = key || existing.s3Key;
   const metadata = await getObjectMetadata(objectKey);
 
-  return prisma.evidence.update({
+  const updated = await prisma.evidence.update({
     where: { id: evidenceId },
     data: {
       s3Key: objectKey,
@@ -333,6 +346,8 @@ export const confirmUpload = async (evidenceId: string, key?: string) => {
       uploadedAt: new Date(),
     },
   });
+
+  return hydrateEvidenceAccess(updated);
 };
 
 export const deleteEvidence = async (evidenceId: string, actorId?: string, isExternal?: boolean) => {
