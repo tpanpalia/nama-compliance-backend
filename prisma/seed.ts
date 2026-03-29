@@ -1,5 +1,16 @@
 import { PrismaClient, ChecklistCategory, UserRole, UserStatus } from '@prisma/client'
 import bcrypt from 'bcryptjs'
+import dotenv from 'dotenv'
+import fs from 'fs'
+import path from 'path'
+
+// Load root env first, then optional env-specific overrides.
+dotenv.config({ path: path.resolve(process.cwd(), '.env') })
+const env = process.env.NODE_ENV || 'development'
+const envPath = path.resolve(process.cwd(), `.env.${env}`)
+if (fs.existsSync(envPath)) {
+  dotenv.config({ path: envPath, override: false })
+}
 
 const prisma = new PrismaClient()
 

@@ -16,7 +16,7 @@ export const inspectorWorkload = async (req: Request, res: Response, next: NextF
   } catch (err) { next(err) }
 }
 
-export const exports = async (req: Request, res: Response, next: NextFunction) => {
+export const listExports = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const page  = parseInt(qsDefault(req.query.page,  '1'),  10)
     const limit = parseInt(qsDefault(req.query.limit, '20'), 10)
