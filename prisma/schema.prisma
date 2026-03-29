@@ -8,349 +8,33 @@ datasource db {
   directUrl = env("DIRECT_URL")
 }
 
-model User {
-  id                 String      @id @default(dbgenerated("(gen_random_uuid())::text"))
-  displayName        String
-  role               UserRole
-  organisation       String?
-  department         String?
-  isActive           Boolean     @default(true)
-  createdAt          DateTime    @default(now()) @db.Timestamptz(6)
-  updatedAt          DateTime    @default(now()) @updatedAt @db.Timestamptz(6)
-  identity           Identity?
-  auditLogs          AuditLog[]
-  reportLogs         ReportLog[]
-  approvedWorkOrders WorkOrder[] @relation("ApproverWorkOrders")
-  createdWorkOrders  WorkOrder[] @relation("CreatorWorkOrders")
-  assignedWorkOrders WorkOrder[] @relation("InspectorWorkOrders")
-  accessRequests     AccessRequest[]
-
-  @@index([role])
-}
-
-model Contractor {
-  id            String         @id @default(dbgenerated("(gen_random_uuid())::text"))
-  contractorId  String         @unique
-  companyName   String
-  tradeLicense  String
-  crNumber      String
-  contactName   String
-  phone         String
-  address       String?
-  regions       String[]       @default([])
-  isActive      Boolean        @default(true)
-  createdAt     DateTime       @default(now()) @db.Timestamptz(6)
-  updatedAt     DateTime       @default(now()) @updatedAt @db.Timestamptz(6)
-  identity      Identity?
-  accessRequest AccessRequest?
-  itemComments  ContractorItemComment[]
-  workOrders    WorkOrder[]
-  @@index([isActive])
-}
-
-model Identity {
-  id           String       @id @default(dbgenerated("(gen_random_uuid())::text"))
-  email        String       @unique
-  password     String
-  role         IdentityRole
-  isActive     Boolean      @default(true)
-  createdAt    DateTime     @default(now()) @db.Timestamptz(6)
-  updatedAt    DateTime     @default(now()) @updatedAt @db.Timestamptz(6)
-  userId       String?      @unique
-  contractorId String?      @unique
-  user         User?        @relation(fields: [userId], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  contractor   Contractor?  @relation(fields: [contractorId], references: [id], onDelete: NoAction, onUpdate: NoAction)
-
-  @@index([email])
-  @@index([role])
-}
-
-model Site {
-  id         String      @id @default(dbgenerated("(gen_random_uuid())::text"))
-  name       String
-  location   String
-  latitude   Float
-  longitude  Float
-  region     String
-  isActive   Boolean     @default(true)
-  createdAt  DateTime    @default(now()) @db.Timestamptz(6)
-  updatedAt  DateTime    @default(now()) @updatedAt @db.Timestamptz(6)
-  workOrders WorkOrder[]
-
-  @@index([isActive])
-  @@index([region])
-}
-
-model WorkOrder {
-  id              String              @id @default(dbgenerated("(gen_random_uuid())::text"))
-  reference       String              @unique
-  title           String
-  description     String?
-  status          WorkOrderStatus     @default(PENDING)
-  priority        WorkOrderPriority   @default(MEDIUM)
-  scheduledDate   DateTime?           @db.Timestamptz(6)
-  startedAt       DateTime?           @db.Timestamptz(6)
-  submittedAt     DateTime?           @db.Timestamptz(6)
-  approvedAt      DateTime?           @db.Timestamptz(6)
-  isLocked        Boolean             @default(false)
-  overallScore    Float?
-  complianceBand  ComplianceBand?
-  rejectionReason String?
-  siteId          String
-  contractorId    String?
-  inspectorId     String?
-  createdById     String
-  approvedById    String?
-  createdAt       DateTime            @default(now()) @db.Timestamptz(6)
-  updatedAt       DateTime            @default(now()) @updatedAt @db.Timestamptz(6)
-  auditLogs       AuditLog[]
-  contractorComments ContractorItemComment[]
-  evidence        Evidence[]
-  approvedBy      User?               @relation("ApproverWorkOrders", fields: [approvedById], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  contractor      Contractor?         @relation(fields: [contractorId], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  createdBy       User                @relation("CreatorWorkOrders", fields: [createdById], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  inspector       User?               @relation("InspectorWorkOrders", fields: [inspectorId], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  site            Site                @relation(fields: [siteId], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  checklist       WorkOrderChecklist?
-
-  @@index([status])
-  @@index([inspectorId])
-  @@index([contractorId])
-  @@index([siteId])
-  @@index([reference])
-  @@index([createdAt])
-  @@index([scheduledDate])
-}
-
-model ContractorItemComment {
-  id              String     @id @default(uuid())
-  workOrderId     String
-  checklistItemId String
-  contractorId    String
-  comment         String
-  createdAt       DateTime   @default(now())
-  updatedAt       DateTime   @updatedAt
-  workOrder       WorkOrder  @relation(fields: [workOrderId], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  contractor      Contractor @relation(fields: [contractorId], references: [id], onDelete: NoAction, onUpdate: NoAction)
-
-  @@unique([workOrderId, checklistItemId, contractorId])
-  @@map("ContractorItemComment")
-  @@index([workOrderId])
-  @@index([contractorId])
-  @@index([checklistItemId])
-}
-
-model ChecklistTemplate {
-  id          String             @id @default(dbgenerated("(gen_random_uuid())::text"))
-  name        String
-  description String?
-  isActive    Boolean            @default(true)
-  version     Int                @default(1)
-  createdAt   DateTime           @default(now()) @db.Timestamptz(6)
-  updatedAt   DateTime           @default(now()) @updatedAt @db.Timestamptz(6)
-  sections    ChecklistSection[]
-
-  @@index([isActive])
-}
-
-model ChecklistSection {
-  id            String            @id @default(dbgenerated("(gen_random_uuid())::text"))
-  name          String
-  description   String?
-  weight        Float
-  order         Int
-  templateId    String
-  items         ChecklistItem[]
-  template      ChecklistTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade, onUpdate: NoAction)
-
-  @@index([templateId])
-  @@index([order])
-}
-
-model ChecklistItem {
-  id         String              @id @default(dbgenerated("(gen_random_uuid())::text"))
-  text       String
-  isRequired Boolean             @default(true)
-  weight     Int                 @default(10)
-  order      Int
-  sectionId  String
-  section    ChecklistSection    @relation(fields: [sectionId], references: [id], onDelete: Cascade, onUpdate: NoAction)
-  responses  ChecklistResponse[]
-  evidence   Evidence[]
-
-  @@index([sectionId])
-  @@index([order])
-}
-
-model WorkOrderChecklist {
-  id                 String              @id @default(dbgenerated("(gen_random_uuid())::text"))
-  workOrderId        String              @unique
-  isSubmitted        Boolean             @default(false)
-  submittedAt        DateTime?           @db.Timestamptz(6)
-  lastSavedAt        DateTime?           @db.Timestamptz(6)
-  submittedLatitude  Float?
-  submittedLongitude Float?
-  createdAt          DateTime            @default(now()) @db.Timestamptz(6)
-  updatedAt          DateTime            @default(now()) @updatedAt @db.Timestamptz(6)
-  responses          ChecklistResponse[]
-  workOrder          WorkOrder           @relation(fields: [workOrderId], references: [id], onDelete: NoAction, onUpdate: NoAction)
-}
-
-model ChecklistResponse {
-  id          String             @id @default(dbgenerated("(gen_random_uuid())::text"))
-  checklistId String
-  itemId      String
-  rating      RatingValue?
-  comment     String?
-  createdAt   DateTime           @default(now()) @db.Timestamptz(6)
-  updatedAt   DateTime           @default(now()) @updatedAt @db.Timestamptz(6)
-  checklist   WorkOrderChecklist @relation(fields: [checklistId], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  item        ChecklistItem      @relation(fields: [itemId], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  evidence    Evidence[]
-
-  @@unique([checklistId, itemId])
-  @@index([checklistId])
-  @@index([rating])
-}
-
-model Evidence {
-  id                 String             @id @default(dbgenerated("(gen_random_uuid())::text"))
-  workOrderId        String
-  checklistItemId    String?
-  checklistResponseId String?
-  type               EvidenceType
-  source             EvidenceSource
-  s3Key              String
-  s3Url              String?
-  s3Bucket           String
-  fileName           String
-  fileSize           Int
-  mimeType           String
-  latitude           Float?
-  longitude          Float?
-  accuracy           Float?
-  locationDisplayName String?
-  locationShortName  String?
-  locationCity       String?
-  locationSuburb     String?
-  locationCountry    String?
-  isLocationFlagged  Boolean            @default(false)
-  locationDistance   Float?
-  isConfirmed        Boolean            @default(false)
-  capturedAt         DateTime?          @db.Timestamptz(6)
-  createdAt          DateTime           @default(now()) @db.Timestamptz(6)
-  uploadedAt         DateTime           @default(now()) @db.Timestamptz(6)
-  workOrder          WorkOrder          @relation(fields: [workOrderId], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  checklistItem      ChecklistItem?     @relation(fields: [checklistItemId], references: [id], onDelete: SetNull, onUpdate: NoAction)
-  checklistResponse  ChecklistResponse? @relation(fields: [checklistResponseId], references: [id], onDelete: SetNull, onUpdate: NoAction)
-
-  @@index([workOrderId])
-  @@index([checklistItemId])
-  @@index([checklistResponseId])
-  @@index([source])
-  @@index([type])
-}
-
-model AuditLog {
-  id          String     @id @default(dbgenerated("(gen_random_uuid())::text"))
-  workOrderId String?
-  userId      String?
-  action      String
-  oldValue    Json?
-  newValue    Json?
-  ipAddress   String?
-  userAgent   String?
-  createdAt   DateTime   @default(now()) @db.Timestamptz(6)
-  user        User?      @relation(fields: [userId], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  workOrder   WorkOrder? @relation(fields: [workOrderId], references: [id], onDelete: NoAction, onUpdate: NoAction)
-
-  @@index([workOrderId])
-  @@index([userId])
-  @@index([action])
-  @@index([createdAt])
-}
-
-model AccessRequest {
-  id           String                  @id @default(uuid())
-  requestId    String                  @unique
-  role         AccessRequestType
-  contactName  String
-  email        String                  @unique
-  phone        String
-  companyName  String?
-  tradeLicense String?
-  crNumber     String?
-  organisation String?
-  department   String?
-  status       AccessRequestStatus     @default(PENDING)
-  reviewedAt   DateTime?
-  reviewNotes  String?
-  contractorId String?                 @unique
-  userId       String?                 @unique
-  createdAt    DateTime                @default(now())
-  updatedAt    DateTime                @updatedAt
-  contractor   Contractor?             @relation(fields: [contractorId], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  user         User?                   @relation(fields: [userId], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  documents    AccessRequestDocument[]
-
-  @@index([status])
-  @@index([role])
-  @@index([email])
-  @@index([createdAt])
-}
-
-model AccessRequestDocument {
-  id              String         @id @default(uuid())
-  accessRequestId String
-  name            String
-  status          DocumentStatus @default(NOT_VERIFIED)
-  fileUrl         String?
-  createdAt       DateTime       @default(now())
-  updatedAt       DateTime       @updatedAt
-  accessRequest   AccessRequest  @relation(fields: [accessRequestId], references: [id], onDelete: Cascade, onUpdate: NoAction)
-
-  @@index([accessRequestId])
-}
-
-model ReportLog {
-  id              String   @id @default(uuid())
-  reportType      String
-  subject         String
-  period          String
-  generatedBy     String
-  generatedAt     DateTime @default(now())
-  fileKey         String
-  fileUrl         String
-  fileSize        Int?
-  filters         Json
-  generatedByUser User     @relation(fields: [generatedBy], references: [id], onDelete: NoAction, onUpdate: NoAction)
-
-  @@map("ReportLog")
-  @@index([generatedAt])
-  @@index([generatedBy])
-}
+// ============================================================
+// ENUMS
+// ============================================================
 
 enum UserRole {
-  INSPECTOR
   ADMIN
-  REGULATOR
-}
-
-enum IdentityRole {
   INSPECTOR
-  ADMIN
   REGULATOR
   CONTRACTOR
 }
 
-enum WorkOrderStatus {
+enum UserStatus {
   PENDING
+  ACTIVE
+  INACTIVE
+  SUSPENDED
+}
+
+enum WorkOrderStatus {
+  UNASSIGNED
   ASSIGNED
   IN_PROGRESS
   SUBMITTED
+  PENDING_INSPECTION
+  INSPECTION_IN_PROGRESS
   INSPECTION_COMPLETED
-  REJECTED
-  REOPENED
+  OVERDUE
 }
 
 enum WorkOrderPriority {
@@ -360,20 +44,58 @@ enum WorkOrderPriority {
   CRITICAL
 }
 
+enum WorkType {
+  HOUSE_CONNECTIONS
+}
+
+enum InspectionStatus {
+  PENDING
+  IN_PROGRESS
+  SUBMITTED
+}
+
+enum ComplianceRating {
+  EXCELLENT
+  GOOD
+  FAIR
+  POOR
+}
+
+enum ChecklistCategory {
+  HSE
+  TECHNICAL
+  PROCESS
+  CLOSURE
+}
+
 enum RatingValue {
   COMPLIANT
   PARTIAL
   NON_COMPLIANT
 }
 
-enum EvidenceType {
-  PHOTO
-  VIDEO
-}
-
-enum EvidenceSource {
+enum EvidenceUploaderRole {
   INSPECTOR
   CONTRACTOR
+}
+
+enum FileCategory {
+  EVIDENCE_PHOTO
+  EVIDENCE_VIDEO
+  REPORT_PDF
+  ACCESS_REQUEST_DOC
+  CR_DOCUMENT
+}
+
+enum UploadStatus {
+  PENDING
+  UPLOADED
+  FAILED
+}
+
+enum AccessRequestRole {
+  CONTRACTOR
+  REGULATOR
 }
 
 enum AccessRequestStatus {
@@ -382,20 +104,491 @@ enum AccessRequestStatus {
   REJECTED
 }
 
-enum AccessRequestType {
-  CONTRACTOR
-  REGULATOR
-}
-
-enum DocumentStatus {
+enum DocumentVerificationStatus {
   NOT_VERIFIED
   VERIFIED
   REJECTED
 }
 
-enum ComplianceBand {
-  EXCELLENT
-  GOOD
-  FAIR
-  POOR
+enum NotificationType {
+  WORK_ORDER_ASSIGNED
+  WORK_ORDER_SUBMITTED
+  INSPECTION_COMPLETED
+  ACCESS_REQUEST_APPROVED
+  ACCESS_REQUEST_REJECTED
+  SCORE_FLAGGED
+  INSPECTOR_REASSIGNED
+}
+
+enum AuditEntityType {
+  WORK_ORDER
+  CONTRACTOR
+  INSPECTION
+  USER
+  CHECKLIST
+  SCORING_WEIGHTS
+  ACCESS_REQUEST
+}
+
+enum AuditAction {
+  CREATED
+  ASSIGNED
+  REASSIGNED
+  SUBMITTED
+  INSPECTION_STARTED
+  INSPECTION_COMPLETED
+  APPROVED
+  REJECTED
+  SUSPENDED
+  ACTIVATED
+  REGISTERED
+  UPDATED
+  SCORE_FLAGGED
+}
+
+enum ReportType {
+  CONTRACTOR_PERFORMANCE
+  SYSTEM_OVERVIEW
+  REGIONAL_ANALYSIS
+  INSPECTOR_WORKLOAD
+}
+
+enum ReportFormat {
+  PDF
+  EXCEL
+  CSV
+}
+
+// ============================================================
+// REFERENCE DATA
+// ============================================================
+
+model Governorate {
+  code       String      @id
+  nameEn     String      @map("name_en")
+  workOrders WorkOrder[]
+
+  @@map("governorates")
+}
+
+// ============================================================
+// AUTH & PROFILES
+// ============================================================
+
+model User {
+  id                String             @id @default(uuid())
+  email             String             @unique
+  passwordHash      String             @map("password_hash")
+  role              UserRole
+  status            UserStatus         @default(PENDING)
+  lastLogin         DateTime?          @map("last_login") @db.Timestamptz
+  createdAt         DateTime           @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt         DateTime           @updatedAt @map("updated_at") @db.Timestamptz
+
+  contractorProfile ContractorProfile?
+  staffProfile      StaffProfile?
+  regulatorProfile  RegulatorProfile?
+
+  assignedWorkOrders WorkOrder[]       @relation("InspectorWorkOrders")
+  uploadedFiles      File[]
+  uploadedEvidence   Evidence[]
+  scoringWeights     ScoringWeight[]
+  checklistVersions  ChecklistVersion[]
+  reportExports      ReportExport[]
+  notifications      Notification[]
+  auditLogs          AuditLog[]
+  reviewedRequests   AccessRequest[]   @relation("ReviewedRequests")
+
+  @@index([role])
+  @@index([status])
+  @@map("users")
+}
+
+// Contractor company profile — cr_number is the business primary key
+model ContractorProfile {
+  crNumber           String    @id @map("cr_number")
+  userId             String    @unique @map("user_id")
+  companyName        String    @map("company_name")
+  contactName        String    @map("contact_name")
+  email              String    @unique
+  phone              String
+  regionsOfOperation String[]  @default([]) @map("regions_of_operation")
+  createdAt          DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt          DateTime  @updatedAt @map("updated_at") @db.Timestamptz
+
+  user               User      @relation(fields: [userId], references: [id], onDelete: NoAction)
+  workOrders         WorkOrder[]
+
+  @@index([companyName])
+  @@index([userId])
+  @@map("contractor_profiles")
+}
+
+// Nama staff: inspectors and admins
+model StaffProfile {
+  userId     String   @id @map("user_id")
+  employeeId String   @unique @map("employee_id")
+  fullName   String   @map("full_name")
+  phone      String
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt  DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  user       User     @relation(fields: [userId], references: [id], onDelete: NoAction)
+
+  @@map("staff_profiles")
+}
+
+// Government regulator profile
+model RegulatorProfile {
+  userId       String   @id @map("user_id")
+  employeeId   String?  @unique @map("employee_id")
+  fullName     String   @map("full_name")
+  phone        String
+  organization String
+  department   String?
+  position     String?
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt    DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  user         User     @relation(fields: [userId], references: [id], onDelete: NoAction)
+
+  @@map("regulator_profiles")
+}
+
+// ============================================================
+// FILES — centralised S3 / Supabase Storage metadata
+// ============================================================
+
+model File {
+  id            String       @id @default(uuid())
+  bucket        String
+  s3Key         String       @unique @map("s3_key")
+  mimeType      String       @map("mime_type")
+  category      FileCategory
+  uploadStatus  UploadStatus @default(PENDING) @map("upload_status")
+  fileSize      BigInt?      @map("file_size")
+  uploadedBy    String?      @map("uploaded_by") // nullable — pre-auth uploads (registration)
+  isDeleted     Boolean      @default(false) @map("is_deleted")
+  uploadedAt    DateTime     @default(now()) @map("uploaded_at") @db.Timestamptz
+  createdAt     DateTime     @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt     DateTime     @updatedAt @map("updated_at") @db.Timestamptz
+
+  uploader      User?        @relation(fields: [uploadedBy], references: [id], onDelete: SetNull)
+  evidence      Evidence[]
+  accessRequest AccessRequest?
+  reportExport  ReportExport?
+
+  @@index([category])
+  @@index([uploadStatus])
+  @@index([uploadedBy])
+  @@map("files")
+}
+
+// ============================================================
+// CHECKLIST & SCORING CONFIG
+// ============================================================
+
+// Versioned scoring weights — locked onto work order at creation.
+// Reset to default = insert new row with default values.
+// No updatedAt — rows are immutable once created.
+model ScoringWeight {
+  id               String    @id @default(uuid())
+  hsePercent       Int       @map("hse_percent")
+  technicalPercent Int       @map("technical_percent")
+  processPercent   Int       @map("process_percent")
+  closurePercent   Int       @map("closure_percent")
+  effectiveFrom    DateTime  @map("effective_from") @db.Date
+  effectiveTo      DateTime? @map("effective_to") @db.Date  // null = currently active
+  createdBy        String    @map("created_by")
+  createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz
+
+  creator          User      @relation(fields: [createdBy], references: [id], onDelete: NoAction)
+  workOrders       WorkOrder[]
+
+  @@index([effectiveFrom])
+  @@index([effectiveTo])
+  @@map("scoring_weights")
+}
+
+// Versioned checklist snapshot — locked onto inspection at creation.
+// items_snapshot stores the full ordered list of items with weights at that point.
+// No updatedAt — rows are immutable once created.
+model ChecklistVersion {
+  versionNumber Int          @id @default(autoincrement()) @map("version_number")
+  itemsSnapshot Json         @map("items_snapshot")
+  effectiveFrom DateTime     @map("effective_from") @db.Date
+  effectiveTo   DateTime?    @map("effective_to") @db.Date  // null = currently active
+  createdBy     String       @map("created_by")
+  createdAt     DateTime     @default(now()) @map("created_at") @db.Timestamptz
+
+  creator       User         @relation(fields: [createdBy], references: [id], onDelete: NoAction)
+  inspections   Inspection[]
+
+  @@index([effectiveFrom])
+  @@map("checklist_versions")
+}
+
+// Live checklist items — immutable text once created (soft delete only).
+// id is human-readable: HSE-001, TECH-001, etc. Set by application on create.
+// question text must NEVER be edited — deactivate and create a new item instead.
+model ChecklistItem {
+  id          String            @id                // e.g. "HSE-001" — set by app
+  question    String
+  category    ChecklistCategory
+  weight      Int               // within-category weight, items per category must sum to 100
+  order       Int               // display order within category
+  isActive    Boolean           @default(true) @map("is_active")
+  createdAt   DateTime          @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt   DateTime          @updatedAt @map("updated_at") @db.Timestamptz
+
+  responses   InspectionResponse[]
+  evidence    Evidence[]
+
+  @@index([category])
+  @@index([isActive])
+  @@index([category, order])
+  @@map("checklist_items")
+}
+
+// ============================================================
+// WORK FLOW
+// ============================================================
+
+// id format: WO-YYYYMMDD-XXXX — generated by application
+model WorkOrder {
+  id                   String            @id @map("work_order_id")
+  contractorCr         String            @map("contractor_cr")
+  assignedInspectorId  String?           @map("assigned_inspector_id")
+  scoringWeightsId     String            @map("scoring_weights_id")
+  governorateCode      String            @map("governorate_code")
+  siteName             String            @map("site_name")
+  description          String?
+  workType             WorkType          @default(HOUSE_CONNECTIONS) @map("work_type")
+  priority             WorkOrderPriority @default(MEDIUM)
+  status               WorkOrderStatus   @default(UNASSIGNED)
+  allocationDate       DateTime          @map("allocation_date") @db.Date
+  targetCompletionDate DateTime          @map("target_completion_date") @db.Date
+  submissionDate       DateTime?         @map("submission_date") @db.Timestamptz
+  createdAt            DateTime          @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt            DateTime          @updatedAt @map("updated_at") @db.Timestamptz
+
+  contractor           ContractorProfile @relation(fields: [contractorCr], references: [crNumber], onDelete: NoAction)
+  assignedInspector    User?             @relation("InspectorWorkOrders", fields: [assignedInspectorId], references: [id], onDelete: SetNull)
+  scoringWeights       ScoringWeight     @relation(fields: [scoringWeightsId], references: [id], onDelete: NoAction)
+  governorate          Governorate       @relation(fields: [governorateCode], references: [code], onDelete: NoAction)
+
+  inspection           Inspection?
+  evidence             Evidence[]
+  notifications        Notification[]
+
+  @@index([status])
+  @@index([contractorCr])
+  @@index([assignedInspectorId])
+  @@index([governorateCode])
+  @@index([allocationDate])
+  @@index([targetCompletionDate])
+  @@index([status, contractorCr])
+  @@map("work_orders")
+}
+
+// One inspection per work order.
+// Created when inspector picks up work order (status → PENDING_INSPECTION).
+// checklistVersionId locked at creation — captures active version at that moment.
+model Inspection {
+  id                 String            @id @default(uuid())
+  workOrderId        String            @unique @map("work_order_id")
+  checklistVersionId Int               @map("checklist_version_id")
+  hseScore           Decimal?          @map("hse_score") @db.Decimal(5, 2)
+  technicalScore     Decimal?          @map("technical_score") @db.Decimal(5, 2)
+  processScore       Decimal?          @map("process_score") @db.Decimal(5, 2)
+  closureScore       Decimal?          @map("closure_score") @db.Decimal(5, 2)
+  finalScore         Decimal?          @map("final_score") @db.Decimal(5, 2)
+  complianceRating   ComplianceRating? @map("compliance_rating")
+  status             InspectionStatus  @default(PENDING)
+  submittedAt        DateTime?         @map("submitted_at") @db.Timestamptz
+  createdAt          DateTime          @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt          DateTime          @updatedAt @map("updated_at") @db.Timestamptz
+
+  workOrder          WorkOrder         @relation(fields: [workOrderId], references: [id], onDelete: NoAction)
+  checklistVersion   ChecklistVersion  @relation(fields: [checklistVersionId], references: [versionNumber], onDelete: NoAction)
+
+  responses          InspectionResponse[]
+  evidence           Evidence[]
+
+  @@index([status])
+  @@index([complianceRating])
+  @@index([finalScore])
+  @@map("inspections")
+}
+
+// One response per checklist item per inspection.
+// questionSnapshot stores the exact question text at time of inspection (Option B).
+// This ensures past inspections remain accurate even if item text changes.
+model InspectionResponse {
+  id                String        @id @default(uuid())
+  inspectionId      String        @map("inspection_id")
+  checklistItemId   String        @map("checklist_item_id")
+  questionSnapshot  String        @map("question_snapshot") // immutable copy of question at inspection time
+  rating            RatingValue?
+  inspectorComments String?       @map("inspector_comments")
+  createdAt         DateTime      @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt         DateTime      @updatedAt @map("updated_at") @db.Timestamptz
+
+  inspection        Inspection    @relation(fields: [inspectionId], references: [id], onDelete: NoAction)
+  checklistItem     ChecklistItem @relation(fields: [checklistItemId], references: [id], onDelete: NoAction)
+
+  @@unique([inspectionId, checklistItemId])
+  @@index([inspectionId])
+  @@index([rating])
+  @@map("inspection_responses")
+}
+
+// ============================================================
+// EVIDENCE
+// ============================================================
+
+// Evidence uploaded by both contractors and inspectors.
+// inspectionId is nullable — contractor uploads before inspection record exists.
+// comment serves both roles: contractor note on their submission,
+// or inspector note on their verification photo.
+// uploaded_by_role distinguishes who uploaded without needing separate tables.
+model Evidence {
+  id              String               @id @default(uuid())
+  workOrderId     String               @map("work_order_id")
+  inspectionId    String?              @map("inspection_id")     // null for contractor uploads
+  checklistItemId String               @map("checklist_item_id")
+  uploadedBy      String               @map("uploaded_by")
+  uploadedByRole  EvidenceUploaderRole @map("uploaded_by_role")
+  fileId          String               @map("file_id")
+  gpsLat          Decimal?             @map("gps_lat") @db.Decimal(10, 8)
+  gpsLng          Decimal?             @map("gps_lng") @db.Decimal(11, 8)
+  gpsAccuracy     Decimal?             @map("gps_accuracy") @db.Decimal(8, 2)
+  comment         String?
+  capturedAt      DateTime?            @map("captured_at") @db.Timestamptz
+  createdAt       DateTime             @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt       DateTime             @updatedAt @map("updated_at") @db.Timestamptz
+
+  workOrder       WorkOrder            @relation(fields: [workOrderId], references: [id], onDelete: NoAction)
+  inspection      Inspection?          @relation(fields: [inspectionId], references: [id], onDelete: NoAction)
+  checklistItem   ChecklistItem        @relation(fields: [checklistItemId], references: [id], onDelete: NoAction)
+  uploader        User                 @relation(fields: [uploadedBy], references: [id], onDelete: NoAction)
+  file            File                 @relation(fields: [fileId], references: [id], onDelete: NoAction)
+
+  @@index([workOrderId])
+  @@index([inspectionId])
+  @@index([checklistItemId])
+  @@index([uploadedBy])
+  @@index([uploadedByRole])
+  @@index([workOrderId, uploadedByRole])
+  @@map("evidence")
+}
+
+// ============================================================
+// ACCESS REQUESTS
+// ============================================================
+
+// id format: REQ-YYYYMMDD-XXXX — generated by application
+// contractorCr is a plain string input — NOT a FK.
+// ContractorProfile is created from it only after admin approves.
+model AccessRequest {
+  id                 String                     @id @map("request_id")
+  applicantName      String                     @map("applicant_name")
+  email              String
+  phone              String?
+  roleRequested      AccessRequestRole          @map("role_requested")
+  contractorCr       String?                    @map("contractor_cr")   // plain string, no FK
+  organization       String?
+  department         String?
+  documentFileId     String?                    @unique @map("document_file_id")
+  documentName       String?                    @map("document_name")
+  verificationStatus DocumentVerificationStatus @default(NOT_VERIFIED) @map("verification_status")
+  status             AccessRequestStatus        @default(PENDING)
+  rejectionReason    String?                    @map("rejection_reason")
+  reviewedBy         String?                    @map("reviewed_by")
+  reviewedAt         DateTime?                  @map("reviewed_at") @db.Timestamptz
+  requestDate        DateTime                   @default(now()) @map("request_date") @db.Timestamptz
+  createdAt          DateTime                   @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt          DateTime                   @updatedAt @map("updated_at") @db.Timestamptz
+
+  documentFile       File?                      @relation(fields: [documentFileId], references: [id], onDelete: SetNull)
+  reviewer           User?                      @relation("ReviewedRequests", fields: [reviewedBy], references: [id], onDelete: SetNull)
+
+  @@index([status])
+  @@index([roleRequested])
+  @@index([email])
+  @@map("access_requests")
+}
+
+// ============================================================
+// NOTIFICATIONS
+// ============================================================
+
+model Notification {
+  id          String           @id @default(uuid())
+  userId      String           @map("user_id")
+  type        NotificationType
+  title       String
+  message     String
+  isRead      Boolean          @default(false) @map("is_read")
+  workOrderId String?          @map("work_order_id")
+  expiresAt   DateTime?        @map("expires_at") @db.Timestamptz
+  createdAt   DateTime         @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt   DateTime         @updatedAt @map("updated_at") @db.Timestamptz
+
+  user        User             @relation(fields: [userId], references: [id], onDelete: NoAction)
+  workOrder   WorkOrder?       @relation(fields: [workOrderId], references: [id], onDelete: SetNull)
+
+  @@index([userId, isRead])
+  @@index([userId])
+  @@index([type])
+  @@map("notifications")
+}
+
+// ============================================================
+// AUDIT LOGS
+// ============================================================
+
+// Append-only log — no updatedAt.
+// performedBy is nullable to support system-triggered actions.
+// entityId is a plain string (no FK) — polymorphic reference.
+// Query pattern: WHERE entity_type = X AND entity_id = Y
+model AuditLog {
+  id          String          @id @default(uuid())
+  performedBy String?         @map("performed_by")
+  entityType  AuditEntityType @map("entity_type")
+  entityId    String          @map("entity_id")
+  action      AuditAction
+  metadata    Json?
+  createdAt   DateTime        @default(now()) @map("created_at") @db.Timestamptz
+
+  performer   User?           @relation(fields: [performedBy], references: [id], onDelete: SetNull)
+
+  @@index([entityType, entityId])
+  @@index([performedBy])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
+
+// ============================================================
+// REPORTS
+// ============================================================
+
+model ReportExport {
+  id             String       @id @default(uuid())
+  generatedBy    String       @map("generated_by")
+  reportType     ReportType   @map("report_type")
+  format         ReportFormat
+  fileId         String?      @unique @map("file_id")
+  parametersUsed Json         @map("parameters_used")
+  generatedAt    DateTime     @default(now()) @map("generated_at") @db.Timestamptz
+  createdAt      DateTime     @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt      DateTime     @updatedAt @map("updated_at") @db.Timestamptz
+
+  generator      User         @relation(fields: [generatedBy], references: [id], onDelete: NoAction)
+  file           File?        @relation(fields: [fileId], references: [id], onDelete: SetNull)
+
+  @@index([generatedBy])
+  @@index([reportType])
+  @@index([generatedAt])
+  @@map("report_exports")
 }
