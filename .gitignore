@@ -1,14 +1,28 @@
+# Dependencies
 node_modules/
+
+# Build output
 dist/
+
+# Environment files — never commit real credentials
 .env
+.env.development
+.env.production
+.env.uat
 .env.local
-.env.supabase
-.tmp-*.err
-codex-dev.out
-codex-dev.err
+
+# Keep the example template
+!.env.example
+
+
+# Logs
+logs/
 *.log
-coverage/
+
+# OS
 .DS_Store
-prisma/migrations/
-prisma/supabase-data-sync.sql
-prisma/supabase-data-sync-exec.sql
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/

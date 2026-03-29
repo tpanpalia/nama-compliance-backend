@@ -1,0 +1,2089 @@
+openapi: 3.0.3
+info:
+  title: NWS Compliance & Inspection System API
+  description: |
+    Backend API for the Nama Water Services Compliance & Inspection System.
+
+    **Roles:**
+    - `ADMIN` — Performance Team (web app)
+    - `REGULATOR` — Government regulator (web app, read-only)
+    - `INSPECTOR` — Field inspector (mobile)
+    - `CONTRACTOR` — Contractor company (mobile)
+
+    **Auth:** All endpoints except `/auth/login`, `/auth/register`, and `/health` require
+    `Authorization: Bearer <access_token>`.
+
+    **File uploads** follow a presign → direct upload → confirm flow.
+    See the `/files/presign` and `/files/{id}/confirm` endpoints.
+  version: 1.0.0
+  contact:
+    name: Nama Water Services — Performance Team
+
+servers:
+  - url: /api
+    description: Current server
+
+tags:
+  - name: Auth
+    description: Login, register, token refresh, password change
+  - name: Me
+    description: Current user profile
+  - name: Notifications
+    description: In-app notifications (all roles)
+  - name: Files
+    description: File presign → upload → confirm flow
+  - name: Admin — Dashboard
+    description: Admin portal KPI dashboard
+  - name: Admin — Work Orders
+    description: Create and manage work orders
+  - name: Admin — Contractors
+    description: Contractor list, detail, status management
+  - name: Admin — Users
+    description: Inspector and admin user management
+  - name: Admin — Access Requests
+    description: Approve or reject contractor/regulator registrations
+  - name: Admin — Checklist
+    description: Manage inspection checklist items
+  - name: Admin — Scoring Weights
+    description: Manage category scoring weight versions
+  - name: Admin — Reports
+    description: Inspector workload report and export history
+  - name: Regulator — Dashboard
+    description: Regulator portal dashboard
+  - name: Regulator — Contractors
+    description: Read-only contractor views for regulators
+  - name: Inspector — Work Orders
+    description: Work pool and assigned work orders
+  - name: Inspector — Inspections
+    description: Start, fill, and submit inspections
+  - name: Inspector — Evidence
+    description: Upload and delete inspection evidence
+  - name: Contractor — Work Orders
+    description: Work orders, start/submit work, upload evidence
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SECURITY
+# ─────────────────────────────────────────────────────────────────────────────
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # SCHEMAS
+  # ─────────────────────────────────────────────────────────────────────────
+  schemas:
+
+    # ── Enums ──────────────────────────────────────────────────────────────
+    UserRole:
+      type: string
+      enum: [ADMIN, INSPECTOR, REGULATOR, CONTRACTOR]
+
+    UserStatus:
+      type: string
+      enum: [PENDING, ACTIVE, INACTIVE, SUSPENDED]
+
+    WorkOrderStatus:
+      type: string
+      enum: [UNASSIGNED, ASSIGNED, IN_PROGRESS, SUBMITTED, PENDING_INSPECTION, INSPECTION_IN_PROGRESS, INSPECTION_COMPLETED, OVERDUE]
+
+    WorkOrderPriority:
+      type: string
+      enum: [LOW, MEDIUM, HIGH, CRITICAL]
+
+    InspectionStatus:
+      type: string
+      enum: [PENDING, IN_PROGRESS, SUBMITTED]
+
+    ComplianceRating:
+      type: string
+      enum: [EXCELLENT, GOOD, FAIR, POOR]
+
+    ChecklistCategory:
+      type: string
+      enum: [HSE, TECHNICAL, PROCESS, CLOSURE]
+
+    RatingValue:
+      type: string
+      enum: [COMPLIANT, PARTIAL, NON_COMPLIANT]
+
+    EvidenceUploaderRole:
+      type: string
+      enum: [INSPECTOR, CONTRACTOR]
+
+    FileCategory:
+      type: string
+      enum: [EVIDENCE_PHOTO, EVIDENCE_VIDEO, REPORT_PDF, ACCESS_REQUEST_DOC, CR_DOCUMENT]
+
+    AccessRequestStatus:
+      type: string
+      enum: [PENDING, APPROVED, REJECTED]
+
+    AccessRequestRole:
+      type: string
+      enum: [CONTRACTOR, REGULATOR]
+
+    NotificationType:
+      type: string
+      enum: [WORK_ORDER_ASSIGNED, WORK_ORDER_SUBMITTED, INSPECTION_COMPLETED, ACCESS_REQUEST_APPROVED, ACCESS_REQUEST_REJECTED, SCORE_FLAGGED, INSPECTOR_REASSIGNED]
+
+    # ── Core models ────────────────────────────────────────────────────────
+    Governorate:
+      type: object
+      properties:
+        code:   { type: string, example: MS }
+        nameEn: { type: string, example: Muscat }
+
+    StaffProfile:
+      type: object
+      properties:
+        userId:     { type: string, format: uuid }
+        employeeId: { type: string, example: EMP-001 }
+        fullName:   { type: string, example: Ahmed Al-Rashdi }
+        phone:      { type: string, example: "+96891234567" }
+        createdAt:  { type: string, format: date-time }
+        updatedAt:  { type: string, format: date-time }
+
+    RegulatorProfile:
+      type: object
+      properties:
+        userId:       { type: string, format: uuid }
+        employeeId:   { type: string, nullable: true }
+        fullName:     { type: string }
+        phone:        { type: string }
+        organization: { type: string }
+        department:   { type: string, nullable: true }
+        position:     { type: string, nullable: true }
+        createdAt:    { type: string, format: date-time }
+        updatedAt:    { type: string, format: date-time }
+
+    ContractorProfile:
+      type: object
+      properties:
+        crNumber:           { type: string, example: CR-2020-001 }
+        userId:             { type: string, format: uuid }
+        companyName:        { type: string, example: Al Noor Contracting LLC }
+        contactName:        { type: string }
+        email:              { type: string, format: email }
+        phone:              { type: string }
+        regionsOfOperation: { type: array, items: { type: string } }
+        createdAt:          { type: string, format: date-time }
+        updatedAt:          { type: string, format: date-time }
+
+    User:
+      type: object
+      properties:
+        id:        { type: string, format: uuid }
+        email:     { type: string, format: email }
+        role:      { $ref: '#/components/schemas/UserRole' }
+        status:    { $ref: '#/components/schemas/UserStatus' }
+        lastLogin: { type: string, format: date-time, nullable: true }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+
+    UserWithProfile:
+      allOf:
+        - $ref: '#/components/schemas/User'
+        - type: object
+          properties:
+            contractorProfile: { $ref: '#/components/schemas/ContractorProfile', nullable: true }
+            staffProfile:      { $ref: '#/components/schemas/StaffProfile',      nullable: true }
+            regulatorProfile:  { $ref: '#/components/schemas/RegulatorProfile',  nullable: true }
+
+    ScoringWeight:
+      type: object
+      properties:
+        id:               { type: string, format: uuid }
+        hsePercent:       { type: integer, example: 30 }
+        technicalPercent: { type: integer, example: 30 }
+        processPercent:   { type: integer, example: 20 }
+        closurePercent:   { type: integer, example: 20 }
+        effectiveFrom:    { type: string, format: date }
+        effectiveTo:      { type: string, format: date, nullable: true, description: "null = currently active" }
+        createdBy:        { type: string, format: uuid }
+        createdAt:        { type: string, format: date-time }
+
+    ChecklistItem:
+      type: object
+      properties:
+        id:        { type: string, example: HSE-001, description: "Human-readable ID — immutable" }
+        question:  { type: string, example: "Contractor workers' compliance with wearing PPE" }
+        category:  { $ref: '#/components/schemas/ChecklistCategory' }
+        weight:    { type: integer, example: 40, description: Within-category weight; items per category sum to 100 }
+        order:     { type: integer }
+        isActive:  { type: boolean }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+
+    InspectionResponse:
+      type: object
+      properties:
+        id:                { type: string, format: uuid }
+        inspectionId:      { type: string, format: uuid }
+        checklistItemId:   { type: string, example: HSE-001 }
+        questionSnapshot:  { type: string, description: Exact question text at the time of inspection (immutable copy) }
+        rating:            { $ref: '#/components/schemas/RatingValue', nullable: true }
+        inspectorComments: { type: string, nullable: true }
+        createdAt:         { type: string, format: date-time }
+        updatedAt:         { type: string, format: date-time }
+
+    Inspection:
+      type: object
+      properties:
+        id:                { type: string, format: uuid }
+        workOrderId:       { type: string }
+        checklistVersionId:{ type: integer }
+        hseScore:          { type: number, format: float, nullable: true }
+        technicalScore:    { type: number, format: float, nullable: true }
+        processScore:      { type: number, format: float, nullable: true }
+        closureScore:      { type: number, format: float, nullable: true }
+        finalScore:        { type: number, format: float, nullable: true }
+        complianceRating:  { $ref: '#/components/schemas/ComplianceRating', nullable: true }
+        status:            { $ref: '#/components/schemas/InspectionStatus' }
+        submittedAt:       { type: string, format: date-time, nullable: true }
+        createdAt:         { type: string, format: date-time }
+        updatedAt:         { type: string, format: date-time }
+
+    WorkOrder:
+      type: object
+      properties:
+        id:                   { type: string, example: WO-20250101-0001 }
+        contractorCr:         { type: string, example: CR-2020-001 }
+        assignedInspectorId:  { type: string, format: uuid, nullable: true }
+        scoringWeightsId:     { type: string, format: uuid }
+        governorateCode:      { type: string, example: MS }
+        siteName:             { type: string }
+        description:          { type: string, nullable: true }
+        workType:             { type: string, enum: [HOUSE_CONNECTIONS] }
+        priority:             { $ref: '#/components/schemas/WorkOrderPriority' }
+        status:               { $ref: '#/components/schemas/WorkOrderStatus' }
+        allocationDate:       { type: string, format: date }
+        targetCompletionDate: { type: string, format: date }
+        submissionDate:       { type: string, format: date-time, nullable: true }
+        createdAt:            { type: string, format: date-time }
+        updatedAt:            { type: string, format: date-time }
+
+    Evidence:
+      type: object
+      properties:
+        id:              { type: string, format: uuid }
+        workOrderId:     { type: string }
+        inspectionId:    { type: string, format: uuid, nullable: true }
+        checklistItemId: { type: string }
+        uploadedBy:      { type: string, format: uuid }
+        uploadedByRole:  { $ref: '#/components/schemas/EvidenceUploaderRole' }
+        fileId:          { type: string, format: uuid }
+        gpsLat:          { type: number, nullable: true }
+        gpsLng:          { type: number, nullable: true }
+        gpsAccuracy:     { type: number, nullable: true }
+        comment:         { type: string, nullable: true }
+        capturedAt:      { type: string, format: date-time, nullable: true }
+        createdAt:       { type: string, format: date-time }
+
+    FileRecord:
+      type: object
+      properties:
+        id:           { type: string, format: uuid }
+        bucket:       { type: string }
+        s3Key:        { type: string }
+        mimeType:     { type: string }
+        category:     { $ref: '#/components/schemas/FileCategory' }
+        uploadStatus: { type: string, enum: [PENDING, UPLOADED, FAILED] }
+        fileSize:     { type: integer, nullable: true }
+        uploadedBy:   { type: string, format: uuid, nullable: true }
+        uploadedAt:   { type: string, format: date-time }
+
+    Notification:
+      type: object
+      properties:
+        id:          { type: string, format: uuid }
+        userId:      { type: string, format: uuid }
+        type:        { $ref: '#/components/schemas/NotificationType' }
+        title:       { type: string }
+        message:     { type: string }
+        isRead:      { type: boolean }
+        workOrderId: { type: string, nullable: true }
+        createdAt:   { type: string, format: date-time }
+
+    AccessRequest:
+      type: object
+      properties:
+        id:                 { type: string, example: REQ-20250101-0001 }
+        applicantName:      { type: string }
+        email:              { type: string, format: email }
+        phone:              { type: string, nullable: true }
+        roleRequested:      { $ref: '#/components/schemas/AccessRequestRole' }
+        contractorCr:       { type: string, nullable: true }
+        organization:       { type: string, nullable: true }
+        department:         { type: string, nullable: true }
+        documentFileId:     { type: string, format: uuid, nullable: true }
+        documentName:       { type: string, nullable: true }
+        verificationStatus: { type: string, enum: [NOT_VERIFIED, VERIFIED, REJECTED] }
+        status:             { $ref: '#/components/schemas/AccessRequestStatus' }
+        rejectionReason:    { type: string, nullable: true }
+        reviewedBy:         { type: string, format: uuid, nullable: true }
+        reviewedAt:         { type: string, format: date-time, nullable: true }
+        requestDate:        { type: string, format: date-time }
+
+    # ── Common response wrappers ───────────────────────────────────────────
+    PaginatedList:
+      type: object
+      properties:
+        total: { type: integer }
+      required: [total]
+
+    ErrorResponse:
+      type: object
+      properties:
+        error: { type: string }
+      required: [error]
+
+    ValidationError:
+      type: object
+      properties:
+        error:   { type: string, example: Validation error }
+        details: { type: array, items: { type: object, properties: { path: { type: string }, message: { type: string } } } }
+
+    # ── Dashboard payloads ─────────────────────────────────────────────────
+    AdminDashboard:
+      type: object
+      properties:
+        kpis:
+          type: object
+          properties:
+            total_inspections:  { type: object, properties: { value: { type: integer }, trend_pct: { type: number } } }
+            active_contractors: { type: object, properties: { value: { type: integer }, trend_count: { type: integer } } }
+            avg_performance:    { type: object, properties: { value: { type: number }, trend_pts: { type: number } } }
+            pending_reviews:    { type: object, properties: { value: { type: integer } } }
+        monthly_trend:
+          type: array
+          items:
+            type: object
+            properties:
+              month:            { type: string, example: "2025-01" }
+              month_label:      { type: string, example: Jan 2025 }
+              inspection_count: { type: integer }
+              avg_compliance:   { type: number }
+        compliance_by_category:
+          type: object
+          properties:
+            hse:       { type: number }
+            technical: { type: number }
+            process:   { type: number }
+            closure:   { type: number }
+        recent_inspections:
+          type: array
+          items:
+            type: object
+            properties:
+              work_order_id:     { type: string }
+              site_name:         { type: string }
+              contractor_name:   { type: string }
+              contractor_cr:     { type: string }
+              submitted_at:      { type: string, format: date-time }
+              work_order_status: { $ref: '#/components/schemas/WorkOrderStatus' }
+              final_score:       { type: number, nullable: true }
+              compliance_rating: { $ref: '#/components/schemas/ComplianceRating', nullable: true }
+        top_contractors:
+          type: array
+          items:
+            type: object
+            properties:
+              cr_number:          { type: string }
+              company_name:       { type: string }
+              avg_score:          { type: number }
+              total_projects:     { type: integer }
+              completed_projects: { type: integer }
+
+    ContractorPerformance:
+      type: object
+      properties:
+        profile:
+          type: object
+          properties:
+            cr_number:    { type: string }
+            company_name: { type: string }
+            contact_name: { type: string }
+            email:        { type: string }
+            phone:        { type: string }
+            regions:      { type: array, items: { type: string } }
+            status:       { $ref: '#/components/schemas/UserStatus' }
+            joined_at:    { type: string, format: date-time }
+        summary:
+          type: object
+          properties:
+            total_work_orders:        { type: integer }
+            completed:                { type: integer }
+            active:                   { type: integer }
+            avg_score:                { type: number, nullable: true }
+            compliance_distribution:
+              type: object
+              properties:
+                excellent: { type: integer }
+                good:      { type: integer }
+                fair:      { type: integer }
+                poor:      { type: integer }
+        category_scores:
+          type: object
+          properties:
+            hse:       { type: number, nullable: true }
+            technical: { type: number, nullable: true }
+            process:   { type: number, nullable: true }
+            closure:   { type: number, nullable: true }
+        monthly_trend:
+          type: array
+          items:
+            type: object
+            properties:
+              month:       { type: string }
+              month_label: { type: string }
+              avg_score:   { type: number, nullable: true }
+              count:       { type: integer }
+        work_orders:
+          type: array
+          items:
+            type: object
+            properties:
+              work_order_id:     { type: string }
+              site_name:         { type: string }
+              governorate_name:  { type: string }
+              status:            { $ref: '#/components/schemas/WorkOrderStatus' }
+              priority:          { $ref: '#/components/schemas/WorkOrderPriority' }
+              allocation_date:   { type: string, format: date }
+              final_score:       { type: number, nullable: true }
+              compliance_rating: { $ref: '#/components/schemas/ComplianceRating', nullable: true }
+
+    InspectorWorkload:
+      type: object
+      properties:
+        inspectors:
+          type: array
+          items:
+            type: object
+            properties:
+              user_id:              { type: string, format: uuid }
+              full_name:            { type: string }
+              employee_id:          { type: string }
+              email:                { type: string }
+              phone:                { type: string }
+              status:               { $ref: '#/components/schemas/UserStatus' }
+              active_work_orders:   { type: integer, description: Current snapshot — not period-filtered }
+              completed_in_period:  { type: integer }
+              avg_score:            { type: number, nullable: true }
+              avg_days_to_complete: { type: number, nullable: true }
+
+    ScoreResult:
+      type: object
+      properties:
+        finalScore:
+          type: number
+          example: 84.5
+        complianceRating:
+          $ref: '#/components/schemas/ComplianceRating'
+        categoryScores:
+          type: object
+          properties:
+            hse:       { type: number, nullable: true }
+            technical: { type: number, nullable: true }
+            process:   { type: number, nullable: true }
+            closure:   { type: number, nullable: true }
+
+# ─────────────────────────────────────────────────────────────────────────────
+# PATHS
+# ─────────────────────────────────────────────────────────────────────────────
+paths:
+
+  # ══════════════════════════════════════════════════════════════════════════
+  # AUTH
+  # ══════════════════════════════════════════════════════════════════════════
+
+  /auth/login:
+    post:
+      tags: [Auth]
+      summary: Login — get access + refresh tokens
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email:    { type: string, format: email }
+                password: { type: string }
+      responses:
+        '200':
+          description: Successful login
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  accessToken:  { type: string }
+                  refreshToken: { type: string }
+                  user:
+                    allOf:
+                      - $ref: '#/components/schemas/UserWithProfile'
+        '401':
+          description: Invalid credentials
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '403':
+          description: Account suspended or inactive
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  /auth/refresh:
+    post:
+      tags: [Auth]
+      summary: Refresh access token
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [refreshToken]
+              properties:
+                refreshToken: { type: string }
+      responses:
+        '200':
+          description: New access token
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  accessToken: { type: string }
+        '401':
+          description: Invalid or expired refresh token
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  /auth/register:
+    post:
+      tags: [Auth]
+      summary: Submit access request (contractor or regulator registration)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [applicantName, email, roleRequested]
+              properties:
+                applicantName:  { type: string, minLength: 2 }
+                email:          { type: string, format: email }
+                phone:          { type: string }
+                roleRequested:  { $ref: '#/components/schemas/AccessRequestRole' }
+                contractorCr:   { type: string, description: "Required when roleRequested = CONTRACTOR" }
+                organization:   { type: string, description: "Required when roleRequested = REGULATOR" }
+                department:     { type: string }
+                documentFileId: { type: string, format: uuid, description: Upload document first via /files/presign }
+                documentName:   { type: string }
+      responses:
+        '201':
+          description: Request submitted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  requestId: { type: string, example: REQ-20250101-0001 }
+                  message:   { type: string }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '409':
+          description: Pending request already exists for this email
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  /auth/me:
+    get:
+      tags: [Me]
+      summary: Get current logged-in user with profile
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          description: Current user
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UserWithProfile' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /auth/me/password:
+    patch:
+      tags: [Me]
+      summary: Change own password
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [currentPassword, newPassword]
+              properties:
+                currentPassword: { type: string }
+                newPassword:     { type: string, minLength: 8 }
+      responses:
+        '200':
+          description: Password updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message: { type: string }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  # ══════════════════════════════════════════════════════════════════════════
+  # NOTIFICATIONS
+  # ══════════════════════════════════════════════════════════════════════════
+
+  /notifications:
+    get:
+      tags: [Notifications]
+      summary: List notifications with unread count
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: unread, in: query, schema: { type: boolean }, description: Filter to unread only }
+        - { $ref: '#/components/parameters/Page' }
+        - { $ref: '#/components/parameters/Limit' }
+      responses:
+        '200':
+          description: Paginated notifications
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/PaginatedList'
+                  - type: object
+                    properties:
+                      items:       { type: array, items: { $ref: '#/components/schemas/Notification' } }
+                      unreadCount: { type: integer }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /notifications/read-all:
+    patch:
+      tags: [Notifications]
+      summary: Mark all notifications as read
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /notifications/{id}/read:
+    patch:
+      tags: [Notifications]
+      summary: Mark single notification as read
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/Id' }
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  # ══════════════════════════════════════════════════════════════════════════
+  # FILES
+  # ══════════════════════════════════════════════════════════════════════════
+
+  /files/presign:
+    post:
+      tags: [Files]
+      summary: Get a presigned upload URL (step 1 of upload flow)
+      description: |
+        Creates a File record (status=PENDING) and returns a short-lived URL for direct upload.
+        The client uploads the file directly to S3/Supabase using this URL, then calls PATCH /files/{id}/confirm.
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [filename, mimeType, category]
+              properties:
+                filename: { type: string }
+                mimeType: { type: string, example: image/jpeg }
+                category: { $ref: '#/components/schemas/FileCategory' }
+                fileSize: { type: integer, description: File size in bytes }
+      responses:
+        '201':
+          description: Presigned upload URL
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  fileId:          { type: string, format: uuid }
+                  uploadUrl:       { type: string, description: PUT this URL directly with the file bytes }
+                  publicUrl:       { type: string }
+                  expiresInSeconds:{ type: integer, example: 900 }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /files/{id}/confirm:
+    patch:
+      tags: [Files]
+      summary: Confirm file upload completed (step 3 of upload flow)
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/Id' }
+      responses:
+        '200':
+          description: File marked as uploaded
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:     { type: boolean }
+                  fileId: { type: string, format: uuid }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /files/{id}/url:
+    get:
+      tags: [Files]
+      summary: Get a 1-hour signed read URL for a file
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/Id' }
+      responses:
+        '200':
+          description: Signed URL
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  url:             { type: string }
+                  expiresInSeconds:{ type: integer, example: 3600 }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  # ══════════════════════════════════════════════════════════════════════════
+  # ADMIN — DASHBOARD
+  # ══════════════════════════════════════════════════════════════════════════
+
+  /admin/dashboard:
+    get:
+      tags: [Admin — Dashboard]
+      summary: Admin dashboard — KPIs, trend, category breakdown, top contractors
+      description: Calls `get_admin_dashboard(year, month)` PostgreSQL function. Single DB roundtrip.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: year
+          in: query
+          schema: { type: integer, default: 2025 }
+          description: Year to filter (default = current year)
+        - name: month
+          in: query
+          schema: { type: integer, minimum: 0, maximum: 12, default: 0 }
+          description: Month (0 = full year, 1–12 = specific month)
+      responses:
+        '200':
+          description: Dashboard payload
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdminDashboard' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  # ══════════════════════════════════════════════════════════════════════════
+  # ADMIN — WORK ORDERS
+  # ══════════════════════════════════════════════════════════════════════════
+
+  /admin/work-orders:
+    get:
+      tags: [Admin — Work Orders]
+      summary: List work orders with filters
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: status, in: query, schema: { $ref: '#/components/schemas/WorkOrderStatus' } }
+        - { name: contractorCr, in: query, schema: { type: string } }
+        - { name: inspectorId, in: query, schema: { type: string, format: uuid } }
+        - { name: governorateCode, in: query, schema: { type: string } }
+        - { $ref: '#/components/parameters/Page' }
+        - { $ref: '#/components/parameters/Limit' }
+      responses:
+        '200':
+          description: Paginated work orders
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/PaginatedList'
+                  - type: object
+                    properties:
+                      items:
+                        type: array
+                        items:
+                          allOf:
+                            - $ref: '#/components/schemas/WorkOrder'
+                            - type: object
+                              properties:
+                                contractor:        { type: object, properties: { companyName: { type: string } } }
+                                assignedInspector: { type: object, nullable: true }
+                                governorate:       { $ref: '#/components/schemas/Governorate' }
+                                inspection:        { $ref: '#/components/schemas/Inspection', nullable: true }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+    post:
+      tags: [Admin — Work Orders]
+      summary: Create a new work order
+      description: |
+        Auto-generates work order ID (WO-YYYYMMDD-XXXX).
+        Locks current active scoring weights onto the work order.
+        If `assignedInspectorId` is provided, status = ASSIGNED and notification sent to inspector.
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [contractorCr, governorateCode, siteName, allocationDate, targetCompletionDate]
+              properties:
+                contractorCr:         { type: string, example: CR-2020-001 }
+                governorateCode:      { type: string, example: MS }
+                siteName:             { type: string }
+                description:          { type: string }
+                priority:             { $ref: '#/components/schemas/WorkOrderPriority' }
+                allocationDate:       { type: string, format: date }
+                targetCompletionDate: { type: string, format: date }
+                assignedInspectorId:  { type: string, format: uuid }
+      responses:
+        '201':
+          description: Created work order
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/WorkOrder' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404':
+          description: Contractor or governorate not found
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  /admin/work-orders/{id}:
+    get:
+      tags: [Admin — Work Orders]
+      summary: Get full work order detail with inspection, all responses, and evidence
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/Id' }
+      responses:
+        '200':
+          description: Full work order
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/WorkOrder'
+                  - type: object
+                    properties:
+                      contractor:        { $ref: '#/components/schemas/ContractorProfile' }
+                      assignedInspector: { $ref: '#/components/schemas/UserWithProfile', nullable: true }
+                      governorate:       { $ref: '#/components/schemas/Governorate' }
+                      scoringWeights:    { $ref: '#/components/schemas/ScoringWeight' }
+                      inspection:
+                        allOf:
+                          - $ref: '#/components/schemas/Inspection'
+                          - type: object
+                            properties:
+                              responses: { type: array, items: { $ref: '#/components/schemas/InspectionResponse' } }
+                              evidence:  { type: array, items: { $ref: '#/components/schemas/Evidence' } }
+                      evidence: { type: array, items: { $ref: '#/components/schemas/Evidence' } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+    patch:
+      tags: [Admin — Work Orders]
+      summary: Update editable work order fields
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/Id' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                siteName:             { type: string }
+                description:          { type: string }
+                priority:             { $ref: '#/components/schemas/WorkOrderPriority' }
+                targetCompletionDate: { type: string, format: date }
+      responses:
+        '200':
+          description: Updated work order
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/WorkOrder' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /admin/work-orders/{id}/assign:
+    patch:
+      tags: [Admin — Work Orders]
+      summary: Assign or reassign inspector
+      description: |
+        - If status = `SUBMITTED`: sets status → `PENDING_INSPECTION` and creates Inspection record with all active checklist items pre-populated.
+        - If status = `UNASSIGNED` or `ASSIGNED`: sets status → `ASSIGNED`.
+        - Sends `WORK_ORDER_ASSIGNED` notification to the inspector.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/Id' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [inspectorId]
+              properties:
+                inspectorId: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Inspector assigned
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:     { type: boolean }
+                  status: { $ref: '#/components/schemas/WorkOrderStatus' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  # ══════════════════════════════════════════════════════════════════════════
+  # ADMIN — CONTRACTORS
+  # ══════════════════════════════════════════════════════════════════════════
+
+  /admin/contractors:
+    get:
+      tags: [Admin — Contractors]
+      summary: List contractors
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: status, in: query, schema: { $ref: '#/components/schemas/UserStatus' } }
+        - { name: search, in: query, schema: { type: string }, description: "Searches company name, CR number, contact name, email" }
+        - { $ref: '#/components/parameters/Page' }
+        - { $ref: '#/components/parameters/Limit' }
+      responses:
+        '200':
+          description: Paginated contractors
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/PaginatedList'
+                  - type: object
+                    properties:
+                      items:
+                        type: array
+                        items:
+                          allOf:
+                            - $ref: '#/components/schemas/ContractorProfile'
+                            - type: object
+                              properties:
+                                user: { type: object, properties: { status: { $ref: '#/components/schemas/UserStatus' }, lastLogin: { type: string }, createdAt: { type: string } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /admin/contractors/{cr}:
+    get:
+      tags: [Admin — Contractors]
+      summary: Get contractor profile and recent work orders
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: cr, in: path, required: true, schema: { type: string }, description: CR Number }
+      responses:
+        '200':
+          description: Contractor detail
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ContractorProfile'
+                  - type: object
+                    properties:
+                      user:       { $ref: '#/components/schemas/User' }
+                      workOrders: { type: array, items: { $ref: '#/components/schemas/WorkOrder' } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /admin/contractors/{cr}/performance:
+    get:
+      tags: [Admin — Contractors]
+      summary: Get full contractor performance metrics (PostgreSQL function)
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: cr, in: path, required: true, schema: { type: string } }
+        - { name: year, in: query, schema: { type: integer, default: 2025 } }
+        - { name: month, in: query, schema: { type: integer, minimum: 0, maximum: 12, default: 0 }, description: 0 = full year }
+      responses:
+        '200':
+          description: Contractor performance data
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ContractorPerformance' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /admin/contractors/{cr}/status:
+    patch:
+      tags: [Admin — Contractors]
+      summary: Update contractor status (activate / suspend / deactivate)
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: cr, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status]
+              properties:
+                status: { type: string, enum: [ACTIVE, SUSPENDED, INACTIVE] }
+                reason: { type: string }
+      responses:
+        '200':
+          description: Status updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:     { type: boolean }
+                  status: { type: string }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  # ══════════════════════════════════════════════════════════════════════════
+  # ADMIN — USERS
+  # ══════════════════════════════════════════════════════════════════════════
+
+  /admin/users:
+    get:
+      tags: [Admin — Users]
+      summary: List staff users (inspectors, admins, regulators)
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: role, in: query, schema: { $ref: '#/components/schemas/UserRole' } }
+        - { name: status, in: query, schema: { $ref: '#/components/schemas/UserStatus' } }
+        - { name: search, in: query, schema: { type: string }, description: "Searches email and full name" }
+        - { $ref: '#/components/parameters/Page' }
+        - { $ref: '#/components/parameters/Limit' }
+      responses:
+        '200':
+          description: Paginated users
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/PaginatedList'
+                  - type: object
+                    properties:
+                      items: { type: array, items: { $ref: '#/components/schemas/UserWithProfile' } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+    post:
+      tags: [Admin — Users]
+      summary: Create inspector or admin user
+      description: Auto-generates a temporary password. Returns `tempPassword` in the response — admin must share it with the user.
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, role, employeeId, fullName, phone]
+              properties:
+                email:      { type: string, format: email }
+                role:       { type: string, enum: [INSPECTOR, ADMIN] }
+                employeeId: { type: string }
+                fullName:   { type: string }
+                phone:      { type: string }
+      responses:
+        '201':
+          description: User created with temp password
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/UserWithProfile'
+                  - type: object
+                    properties:
+                      tempPassword: { type: string, example: "Temp@ABC123" }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409':
+          description: Email or employee ID already in use
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  /admin/users/{id}:
+    get:
+      tags: [Admin — Users]
+      summary: Get user detail
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/Id' }
+      responses:
+        '200':
+          description: User detail
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UserWithProfile' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /admin/users/{id}/status:
+    patch:
+      tags: [Admin — Users]
+      summary: Activate, suspend, or deactivate a user
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/Id' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status]
+              properties:
+                status: { $ref: '#/components/schemas/UserStatus' }
+      responses:
+        '200':
+          description: Status updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:     { type: boolean }
+                  status: { $ref: '#/components/schemas/UserStatus' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  # ══════════════════════════════════════════════════════════════════════════
+  # ADMIN — ACCESS REQUESTS
+  # ══════════════════════════════════════════════════════════════════════════
+
+  /admin/access-requests:
+    get:
+      tags: [Admin — Access Requests]
+      summary: List access requests
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: status, in: query, schema: { $ref: '#/components/schemas/AccessRequestStatus' } }
+        - { name: role, in: query, schema: { $ref: '#/components/schemas/AccessRequestRole' } }
+        - { $ref: '#/components/parameters/Page' }
+        - { $ref: '#/components/parameters/Limit' }
+      responses:
+        '200':
+          description: Paginated access requests
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/PaginatedList'
+                  - type: object
+                    properties:
+                      items: { type: array, items: { $ref: '#/components/schemas/AccessRequest' } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /admin/access-requests/{id}:
+    get:
+      tags: [Admin — Access Requests]
+      summary: Get access request detail with document
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/Id' }
+      responses:
+        '200':
+          description: Access request
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AccessRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /admin/access-requests/{id}/approve:
+    post:
+      tags: [Admin — Access Requests]
+      summary: Approve access request — creates user + profile
+      description: |
+        - CONTRACTOR: creates `users` + `contractor_profiles` (crNumber from request).
+        - REGULATOR: creates `users` + `regulator_profiles`.
+        - Sends `ACCESS_REQUEST_APPROVED` notification.
+        - Returns `tempPassword` for admin to share with new user.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/Id' }
+      responses:
+        '200':
+          description: Approved, user created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:          { type: boolean }
+                  userId:      { type: string, format: uuid }
+                  tempPassword:{ type: string }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: User or contractor CR already exists
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  /admin/access-requests/{id}/reject:
+    post:
+      tags: [Admin — Access Requests]
+      summary: Reject access request with reason
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/Id' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason: { type: string }
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  # ══════════════════════════════════════════════════════════════════════════
+  # ADMIN — CHECKLIST
+  # ══════════════════════════════════════════════════════════════════════════
+
+  /admin/checklist:
+    get:
+      tags: [Admin — Checklist]
+      summary: List checklist items
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: active, in: query, schema: { type: boolean } }
+        - { name: category, in: query, schema: { $ref: '#/components/schemas/ChecklistCategory' } }
+      responses:
+        '200':
+          description: Checklist items ordered by category + order
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/ChecklistItem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+    post:
+      tags: [Admin — Checklist]
+      summary: Create a new checklist item
+      description: |
+        ID format: `HSE-001`, `TECH-007`, `PROC-003`, `CLOSE-001`.
+        Question text is **immutable** — to change it, deactivate and create a new item.
+        Per-category weights should sum to 100.
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [id, question, category, weight, order]
+              properties:
+                id:       { type: string, example: HSE-004, pattern: '^[A-Z]+-\d{3}$' }
+                question: { type: string, minLength: 5 }
+                category: { $ref: '#/components/schemas/ChecklistCategory' }
+                weight:   { type: integer, minimum: 1, maximum: 100 }
+                order:    { type: integer, minimum: 1 }
+      responses:
+        '201':
+          description: Created item
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ChecklistItem' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409':
+          description: Item ID already exists
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  /admin/checklist/{id}/deactivate:
+    patch:
+      tags: [Admin — Checklist]
+      summary: Soft-delete a checklist item
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string }, description: "e.g. HSE-001" }
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  # ══════════════════════════════════════════════════════════════════════════
+  # ADMIN — SCORING WEIGHTS
+  # ══════════════════════════════════════════════════════════════════════════
+
+  /admin/scoring-weights:
+    get:
+      tags: [Admin — Scoring Weights]
+      summary: List all scoring weight versions
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          description: All versions, newest first
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/ScoringWeight' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+    post:
+      tags: [Admin — Scoring Weights]
+      summary: Create new scoring weights (closes current active version)
+      description: |
+        The four percentages must sum to exactly 100.
+        Creating new weights automatically sets `effectiveTo` on the currently active row.
+        All future work orders will use the new weights.
+        Existing work orders retain their locked weights.
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [hsePercent, technicalPercent, processPercent, closurePercent, effectiveFrom]
+              properties:
+                hsePercent:       { type: integer, example: 30 }
+                technicalPercent: { type: integer, example: 30 }
+                processPercent:   { type: integer, example: 20 }
+                closurePercent:   { type: integer, example: 20 }
+                effectiveFrom:    { type: string, format: date }
+      responses:
+        '201':
+          description: New scoring weights created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ScoringWeight' }
+        '400':
+          description: Percentages do not sum to 100
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ValidationError' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  # ══════════════════════════════════════════════════════════════════════════
+  # ADMIN — REPORTS
+  # ══════════════════════════════════════════════════════════════════════════
+
+  /admin/reports/inspector-workload:
+    get:
+      tags: [Admin — Reports]
+      summary: Inspector workload report (PostgreSQL function)
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: from, in: query, required: true, schema: { type: string, format: date }, example: "2025-01-01" }
+        - { name: to, in: query, required: true, schema: { type: string, format: date }, example: "2025-12-31" }
+      responses:
+        '200':
+          description: Inspector workload data
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/InspectorWorkload' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /admin/reports/exports:
+    get:
+      tags: [Admin — Reports]
+      summary: List generated report exports
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/Page' }
+        - { $ref: '#/components/parameters/Limit' }
+      responses:
+        '200':
+          description: Paginated exports
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/PaginatedList'
+                  - type: object
+                    properties:
+                      items:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            id:            { type: string, format: uuid }
+                            reportType:    { type: string }
+                            format:        { type: string, enum: [PDF, EXCEL, CSV] }
+                            parametersUsed:{ type: object }
+                            generatedAt:   { type: string, format: date-time }
+                            file:          { type: object, nullable: true, properties: { s3Key: { type: string } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /admin/reports/governorates:
+    get:
+      tags: [Admin — Reports]
+      summary: List all governorates (for dropdown filters)
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          description: All 11 Oman governorates
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Governorate' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  # ══════════════════════════════════════════════════════════════════════════
+  # REGULATOR — DASHBOARD
+  # ══════════════════════════════════════════════════════════════════════════
+
+  /regulator/dashboard:
+    get:
+      tags: [Regulator — Dashboard]
+      summary: Regulator dashboard — KPIs, trends, regional performance, top/bottom performers
+      description: Calls `get_regulator_dashboard(from, to)` PostgreSQL function. Single DB roundtrip.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: from, in: query, schema: { type: string, format: date }, description: "Default: Jan 1 of current year" }
+        - { name: to, in: query, schema: { type: string, format: date }, description: "Default: today" }
+      responses:
+        '200':
+          description: Regulator dashboard payload
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  kpis:
+                    type: object
+                    properties:
+                      total_contractors:   { type: object }
+                      total_inspections:   { type: object }
+                      avg_compliance:      { type: object }
+                      non_compliant_items: { type: object }
+                  compliance_trend:        { type: array, items: { type: object } }
+                  compliance_distribution: { type: object }
+                  regional_performance:    { type: array, items: { type: object } }
+                  category_performance:    { type: object }
+                  top_performers:          { type: array, items: { type: object } }
+                  bottom_performers:       { type: array, items: { type: object } }
+                  recent_activity:         { type: array, items: { type: object } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  # ══════════════════════════════════════════════════════════════════════════
+  # REGULATOR — CONTRACTORS
+  # ══════════════════════════════════════════════════════════════════════════
+
+  /regulator/contractors:
+    get:
+      tags: [Regulator — Contractors]
+      summary: List contractors (read-only)
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: status, in: query, schema: { $ref: '#/components/schemas/UserStatus' } }
+        - { name: search, in: query, schema: { type: string } }
+        - { $ref: '#/components/parameters/Page' }
+        - { $ref: '#/components/parameters/Limit' }
+      responses:
+        '200':
+          description: Paginated contractors
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/PaginatedList'
+                  - type: object
+                    properties:
+                      items: { type: array, items: { $ref: '#/components/schemas/ContractorProfile' } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /regulator/contractors/{cr}:
+    get:
+      tags: [Regulator — Contractors]
+      summary: Get contractor basic info (read-only)
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: cr, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: Contractor detail
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ContractorProfile' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /regulator/contractors/{cr}/performance:
+    get:
+      tags: [Regulator — Contractors]
+      summary: Get contractor performance metrics (same as admin view)
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: cr, in: path, required: true, schema: { type: string } }
+        - { name: year, in: query, schema: { type: integer } }
+        - { name: month, in: query, schema: { type: integer, minimum: 0, maximum: 12 } }
+      responses:
+        '200':
+          description: Performance data
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ContractorPerformance' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  # ══════════════════════════════════════════════════════════════════════════
+  # INSPECTOR — WORK ORDERS
+  # ══════════════════════════════════════════════════════════════════════════
+
+  /inspector/work-orders:
+    get:
+      tags: [Inspector — Work Orders]
+      summary: List work orders by view type
+      description: |
+        - `view=pool` — Work pool: all SUBMITTED work orders with no assigned inspector (unassigned). Shown as "Unassigned" in the app.
+        - `view=mine` — My work orders: assigned to me, status = ASSIGNED/PENDING_INSPECTION/INSPECTION_IN_PROGRESS.
+        - `view=completed` — My completed inspections.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: view, in: query, schema: { type: string, enum: [pool, mine, completed], default: pool } }
+        - { $ref: '#/components/parameters/Page' }
+        - { $ref: '#/components/parameters/Limit' }
+      responses:
+        '200':
+          description: Paginated work orders
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/PaginatedList'
+                  - type: object
+                    properties:
+                      items: { type: array, items: { $ref: '#/components/schemas/WorkOrder' } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /inspector/work-orders/{id}:
+    get:
+      tags: [Inspector — Work Orders]
+      summary: Get work order detail including contractor evidence
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/Id' }
+      responses:
+        '200':
+          description: Work order with contractor-uploaded evidence
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/WorkOrder'
+                  - type: object
+                    properties:
+                      contractor:  { $ref: '#/components/schemas/ContractorProfile' }
+                      governorate: { $ref: '#/components/schemas/Governorate' }
+                      inspection:  { $ref: '#/components/schemas/Inspection', nullable: true }
+                      evidence:    { type: array, items: { $ref: '#/components/schemas/Evidence' }, description: Contractor evidence only }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /inspector/work-orders/{id}/claim:
+    post:
+      tags: [Inspector — Work Orders]
+      summary: Claim work order from pool — creates Inspection record
+      description: |
+        - Verifies status = SUBMITTED and unassigned.
+        - Sets assigned_inspector_id = current inspector.
+        - Work order status → PENDING_INSPECTION.
+        - Creates Inspection (status=PENDING) locked to current active checklist version.
+        - Pre-populates one InspectionResponse per active checklist item with question_snapshot.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/Id' }
+      responses:
+        '200':
+          description: Claimed successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:           { type: boolean }
+                  status:       { type: string, example: PENDING_INSPECTION }
+                  inspectionId: { type: string, format: uuid }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: Already claimed by another inspector
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  # ══════════════════════════════════════════════════════════════════════════
+  # INSPECTOR — INSPECTIONS
+  # ══════════════════════════════════════════════════════════════════════════
+
+  /inspector/inspections:
+    get:
+      tags: [Inspector — Inspections]
+      summary: List inspector's own inspections
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: status, in: query, schema: { $ref: '#/components/schemas/InspectionStatus' } }
+        - { $ref: '#/components/parameters/Page' }
+        - { $ref: '#/components/parameters/Limit' }
+      responses:
+        '200':
+          description: Paginated inspections
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/PaginatedList'
+                  - type: object
+                    properties:
+                      items: { type: array, items: { $ref: '#/components/schemas/Inspection' } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /inspector/inspections/{id}:
+    get:
+      tags: [Inspector — Inspections]
+      summary: Get full inspection — responses, evidence from both roles, scoring weights
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/Id' }
+      responses:
+        '200':
+          description: Full inspection payload
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Inspection'
+                  - type: object
+                    properties:
+                      workOrder:
+                        allOf:
+                          - $ref: '#/components/schemas/WorkOrder'
+                          - type: object
+                            properties:
+                              scoringWeights: { $ref: '#/components/schemas/ScoringWeight' }
+                              evidence: { type: array, items: { $ref: '#/components/schemas/Evidence' }, description: Contractor evidence }
+                      responses: { type: array, items: { $ref: '#/components/schemas/InspectionResponse' }, description: "Ordered by category + item order" }
+                      evidence:  { type: array, items: { $ref: '#/components/schemas/Evidence' }, description: Inspector evidence }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403':
+          description: Not your inspection
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /inspector/inspections/{id}/start:
+    post:
+      tags: [Inspector — Inspections]
+      summary: Begin inspection — PENDING → IN_PROGRESS
+      description: |
+        - Inspection status: PENDING → IN_PROGRESS
+        - Work order status: PENDING_INSPECTION → INSPECTION_IN_PROGRESS
+        - Audit logged.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/Id' }
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /inspector/inspections/{id}/responses:
+    put:
+      tags: [Inspector — Inspections]
+      summary: Save / update checklist item ratings and comments (draft — no status change)
+      description: |
+        Can be called multiple times as inspector works through the list.
+        Partial saves supported — only send updated items.
+        Inspection must be IN_PROGRESS.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/Id' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [responses]
+              properties:
+                responses:
+                  type: array
+                  items:
+                    type: object
+                    required: [checklistItemId]
+                    properties:
+                      checklistItemId:   { type: string, example: HSE-001 }
+                      rating:            { $ref: '#/components/schemas/RatingValue', nullable: true }
+                      inspectorComments: { type: string, nullable: true }
+      responses:
+        '200':
+          description: Responses saved
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:    { type: boolean }
+                  saved: { type: integer }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /inspector/inspections/{id}/submit:
+    post:
+      tags: [Inspector — Inspections]
+      summary: Submit inspection — calculates scores and marks INSPECTION_COMPLETED
+      description: |
+        **Precondition:** All checklist items must have a rating (no nulls).
+
+        **Server-side score calculation:**
+        - COMPLIANT = 1.0, PARTIAL = 0.5, NON_COMPLIANT = 0.0
+        - Category score = Σ(rating × item_weight) / Σ(item_weights) × 100
+        - Final score = Σ(category_score × category_percent) / 100
+        - Rating: EXCELLENT ≥ 90, GOOD ≥ 80, FAIR ≥ 70, POOR < 70
+
+        **State changes:**
+        - Inspection: status → SUBMITTED, scores populated, submitted_at = now
+        - Work order: status → INSPECTION_COMPLETED
+        - Notifications sent to all ADMIN users
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/Id' }
+      responses:
+        '200':
+          description: Scores calculated and inspection submitted
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ScoreResult' }
+        '400':
+          description: Unrated items remaining
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  # ══════════════════════════════════════════════════════════════════════════
+  # INSPECTOR — EVIDENCE
+  # ══════════════════════════════════════════════════════════════════════════
+
+  /inspector/evidence:
+    post:
+      tags: [Inspector — Evidence]
+      summary: Attach uploaded file as inspector evidence for a checklist item
+      description: File must already be uploaded and confirmed via /files/presign → /files/{id}/confirm.
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [inspectionId, workOrderId, checklistItemId, fileId]
+              properties:
+                inspectionId:    { type: string, format: uuid }
+                workOrderId:     { type: string }
+                checklistItemId: { type: string }
+                fileId:          { type: string, format: uuid }
+                comment:         { type: string }
+                gpsLat:          { type: number }
+                gpsLng:          { type: number }
+                gpsAccuracy:     { type: number, description: Accuracy in metres }
+                capturedAt:      { type: string, format: date-time }
+      responses:
+        '201':
+          description: Evidence created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Evidence' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /inspector/evidence/{id}:
+    delete:
+      tags: [Inspector — Evidence]
+      summary: Delete inspector evidence from an in-progress inspection
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/Id' }
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+        '400':
+          description: Cannot delete from submitted inspection
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  # ══════════════════════════════════════════════════════════════════════════
+  # CONTRACTOR — WORK ORDERS
+  # ══════════════════════════════════════════════════════════════════════════
+
+  /contractor/work-orders:
+    get:
+      tags: [Contractor — Work Orders]
+      summary: List contractor's own work orders
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: status, in: query, schema: { $ref: '#/components/schemas/WorkOrderStatus' } }
+        - { $ref: '#/components/parameters/Page' }
+        - { $ref: '#/components/parameters/Limit' }
+      responses:
+        '200':
+          description: Paginated work orders with inspection result
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/PaginatedList'
+                  - type: object
+                    properties:
+                      items: { type: array, items: { $ref: '#/components/schemas/WorkOrder' } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /contractor/work-orders/{id}:
+    get:
+      tags: [Contractor — Work Orders]
+      summary: Get work order detail with own evidence and inspection result
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/Id' }
+      responses:
+        '200':
+          description: Work order detail
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/WorkOrder'
+                  - type: object
+                    properties:
+                      governorate: { $ref: '#/components/schemas/Governorate' }
+                      inspection:
+                        allOf:
+                          - $ref: '#/components/schemas/Inspection'
+                          - type: object
+                            properties:
+                              responses: { type: array, items: { type: object, properties: { id: { type: string }, checklistItemId: { type: string }, questionSnapshot: { type: string }, rating: { $ref: '#/components/schemas/RatingValue', nullable: true } } }, description: Rating results (read-only for contractor) }
+                      evidence: { type: array, items: { $ref: '#/components/schemas/Evidence' }, description: Contractor's own uploaded evidence only }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /contractor/work-orders/{id}/start:
+    patch:
+      tags: [Contractor — Work Orders]
+      summary: Start work — ASSIGNED → IN_PROGRESS
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/Id' }
+      responses:
+        '200':
+          description: Work order updated
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/WorkOrder' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /contractor/work-orders/{id}/submit:
+    post:
+      tags: [Contractor — Work Orders]
+      summary: Submit completed work — IN_PROGRESS → SUBMITTED
+      description: |
+        Work order status → SUBMITTED, submission_date = now.
+        Work order now appears in the Inspector app work pool.
+        Notifications sent to all ADMIN users.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/Id' }
+      responses:
+        '200':
+          description: Work submitted
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/WorkOrder' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /contractor/work-orders/{id}/evidence:
+    post:
+      tags: [Contractor — Work Orders]
+      summary: Upload evidence for a checklist item during work
+      description: |
+        Allowed when work order status is ASSIGNED or IN_PROGRESS.
+        `comment` = contractor's note on this photo/video.
+        File must already be uploaded and confirmed via /files/presign → /files/{id}/confirm.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/Id' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [checklistItemId, fileId]
+              properties:
+                checklistItemId: { type: string, example: HSE-001 }
+                fileId:          { type: string, format: uuid }
+                comment:         { type: string, description: Contractor note on this evidence }
+                gpsLat:          { type: number }
+                gpsLng:          { type: number }
+                gpsAccuracy:     { type: number }
+                capturedAt:      { type: string, format: date-time }
+      responses:
+        '201':
+          description: Evidence created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Evidence' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+# ─────────────────────────────────────────────────────────────────────────────
+# REUSABLE PARAMETERS & RESPONSES
+# ─────────────────────────────────────────────────────────────────────────────
+  parameters:
+    Id:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+
+    Page:
+      name: page
+      in: query
+      schema: { type: integer, minimum: 1, default: 1 }
+
+    Limit:
+      name: limit
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+
+  responses:
+    Ok:
+      description: Success
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              ok: { type: boolean, example: true }
+
+    BadRequest:
+      description: Validation error
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ValidationError' }
+
+    Unauthorized:
+      description: Missing or invalid bearer token
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+    Forbidden:
+      description: Insufficient role
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+security:
+  - bearerAuth: []

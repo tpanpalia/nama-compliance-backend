@@ -1,161 +1,81 @@
-import { NextFunction, Request, Response } from 'express';
-import bcrypt from 'bcryptjs';
-import { prisma } from '../config/database';
-import { COOKIE_NAME, COOKIE_OPTIONS, JWTPayload, signToken } from '../config/auth';
-import { AppError } from '../utils/AppError';
+import { Request, Response, NextFunction } from 'express'
+import { z } from 'zod'
+import { authService } from '../services/auth.service'
 
-const BCRYPT_ROUNDS = 10;
-const DUMMY_HASH = bcrypt.hashSync('dummy_password_for_timing', BCRYPT_ROUNDS);
+const loginSchema = z.object({
+  email:    z.string().email(),
+  password: z.string().min(1),
+})
+
+const registerSchema = z.object({
+  applicantName:  z.string().min(2),
+  email:          z.string().email(),
+  phone:          z.string().optional(),
+  roleRequested:  z.enum(['CONTRACTOR', 'REGULATOR']),
+  contractorCr:   z.string().optional(),
+  organization:   z.string().optional(),
+  department:     z.string().optional(),
+  documentFileId: z.string().uuid().optional(),
+  documentName:   z.string().optional(),
+})
+
+const updateProfileSchema = z.object({
+  fullName:     z.string().min(2).optional(),
+  phone:        z.string().optional(),
+  companyName:  z.string().min(1).optional(),
+  contactName:  z.string().min(2).optional(),
+  organization: z.string().optional(),
+  department:   z.string().nullable().optional(),
+}).strict()
+
+const changePasswordSchema = z.object({
+  currentPassword: z.string().min(1),
+  newPassword:     z.string().min(8),
+})
 
 export const login = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { email, password } = req.body;
+    const { email, password } = loginSchema.parse(req.body)
+    const result = await authService.login(email, password)
+    res.json(result)
+  } catch (err) { next(err) }
+}
 
-    if (!email || !password) {
-      return res.status(400).json({
-        error: 'Email and password are required',
-        code: 'MISSING_CREDENTIALS',
-      });
-    }
-
-    if (typeof email !== 'string' || typeof password !== 'string') {
-      return res.status(400).json({
-        error: 'Invalid input format',
-        code: 'INVALID_INPUT',
-      });
-    }
-
-    const emailNormalized = email.toLowerCase().trim();
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(emailNormalized)) {
-      return res.status(400).json({
-        error: 'Invalid email format',
-        code: 'INVALID_EMAIL',
-      });
-    }
-
-    const identity = await prisma.identity.findUnique({
-      where: { email: emailNormalized },
-      include: {
-        user: true,
-        contractor: true,
-      },
-    });
-
-    const hashToCompare = identity?.password || DUMMY_HASH;
-    const passwordMatch = await bcrypt.compare(password, hashToCompare);
-
-    if (!identity || !passwordMatch) {
-      return res.status(401).json({
-        error: 'Invalid email or password',
-        code: 'INVALID_CREDENTIALS',
-      });
-    }
-
-    const profile = identity.user || identity.contractor;
-    const profileIsActive = profile?.isActive ?? false;
-
-    if (!identity.isActive || !profileIsActive) {
-      return res.status(403).json({
-        error: 'Account is deactivated. Contact your administrator.',
-        code: 'ACCOUNT_INACTIVE',
-      });
-    }
-
-    const displayName = identity.user?.displayName || identity.contractor?.companyName || identity.email;
-    const jwtPayload: JWTPayload = {
-      identityId: identity.id,
-      email: emailNormalized,
-      role: identity.role,
-      displayName,
-      dbUserId: identity.userId || undefined,
-      contractorId: identity.contractorId || undefined,
-    };
-
-    const token = signToken(jwtPayload);
-    res.cookie(COOKIE_NAME, token, COOKIE_OPTIONS);
-
-    return res.json({
-      data: {
-        user: {
-          id: identity.contractorId || identity.userId || identity.id,
-          email: emailNormalized,
-          role: identity.role,
-          displayName,
-          isExternal: identity.role === 'CONTRACTOR',
-        },
-        token,
-      },
-      message: 'Login successful',
-    });
-  } catch (err) {
-    return next(err);
-  }
-};
-
-export const getMe = async (req: Request, res: Response, next: NextFunction) => {
+export const refresh = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const identityId = req.user?.identityId;
-    if (!identityId) throw new AppError('Authentication required', 401, 'NO_TOKEN');
+    const { refreshToken } = z.object({ refreshToken: z.string() }).parse(req.body)
+    const result = await authService.refresh(refreshToken)
+    res.json(result)
+  } catch (err) { next(err) }
+}
 
-    const identity = await prisma.identity.findUnique({
-      where: { id: identityId },
-      include: {
-        user: true,
-        contractor: true,
-      },
-    });
-
-    if (!identity) {
-      throw new AppError('Identity not found', 404, 'NOT_FOUND');
-    }
-
-    if (identity.contractor) {
-      return res.json({
-        data: {
-          id: identity.contractor.id,
-          email: identity.email,
-          companyName: identity.contractor.companyName,
-          contractorId: identity.contractor.contractorId,
-          isActive: identity.contractor.isActive && identity.isActive,
-          role: identity.role,
-          isExternal: true,
-          displayName: identity.contractor.companyName,
-        },
-      });
-    }
-
-    if (identity.user) {
-      return res.json({
-        data: {
-          id: identity.user.id,
-          email: identity.email,
-          role: identity.user.role,
-          displayName: identity.user.displayName,
-          organisation: identity.user.organisation,
-          department: identity.user.department,
-          isActive: identity.user.isActive && identity.isActive,
-          isExternal: false,
-        },
-      });
-    }
-
-    throw new AppError('Identity profile is missing', 400, 'INVALID_IDENTITY');
-  } catch (err) {
-    return next(err);
-  }
-};
-
-export const logout = async (_req: Request, res: Response, next: NextFunction) => {
+export const register = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    res.clearCookie(COOKIE_NAME, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: process.env.NODE_ENV === 'production' ? 'strict' : 'lax',
-      path: '/',
-    });
-    return res.json({ message: 'Logged out successfully' });
-  } catch (err) {
-    return next(err);
-  }
-};
+    const data   = registerSchema.parse(req.body)
+    const result = await authService.register(data)
+    res.status(201).json(result)
+  } catch (err) { next(err) }
+}
+
+export const me = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const result = await authService.me(req.user!.userId)
+    res.json(result)
+  } catch (err) { next(err) }
+}
+
+export const updateProfile = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const data   = updateProfileSchema.parse(req.body)
+    const result = await authService.updateProfile(req.user!.userId, req.user!.role, data)
+    res.json(result)
+  } catch (err) { next(err) }
+}
+
+export const changePassword = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { currentPassword, newPassword } = changePasswordSchema.parse(req.body)
+    const result = await authService.changePassword(req.user!.userId, currentPassword, newPassword)
+    res.json(result)
+  } catch (err) { next(err) }
+}
