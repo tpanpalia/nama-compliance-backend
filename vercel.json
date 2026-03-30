@@ -1,6 +1,6 @@
 {
   "version": 2,
-  "buildCommand": "npx prisma generate && tsc",
+  "buildCommand": "npx prisma generate && npx tsc",
   "outputDirectory": ".",
   "functions": {
     "api/index.ts": {
