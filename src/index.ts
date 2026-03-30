@@ -31,7 +31,7 @@ app.use(helmet({
   crossOriginEmbedderPolicy: false,
 }))
 app.use(cors({
-  origin:      config.corsOrigin,
+  origin:      config.corsOrigin.split(',').map((o) => o.trim()),
   credentials: true,
 }))
 app.use(express.json({ limit: '10mb' }))
