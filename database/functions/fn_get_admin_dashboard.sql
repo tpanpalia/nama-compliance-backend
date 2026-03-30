@@ -18,11 +18,14 @@ RETURNS jsonb
 LANGUAGE plpgsql
 STABLE
 AS $$
+
 DECLARE
   v_from_date  date;
   v_to_date    date;
   v_prev_from  date;
   v_prev_to    date;
+  v_trend_from date;
+  v_trend_to   date;
 BEGIN
 
   -- ── Date range for current period ────────────────────────
@@ -36,6 +39,14 @@ BEGIN
     v_to_date   := (make_date(p_year, p_month, 1) + interval '1 month - 1 day')::date;
     v_prev_from := (v_from_date - interval '1 month')::date;
     v_prev_to   := v_from_date - 1;
+  END IF;
+
+  IF p_month = 0 THEN
+    v_trend_from := make_date(p_year, 1, 1);
+    v_trend_to   := make_date(p_year, 12, 1);
+  ELSE
+    v_trend_to   := make_date(p_year, p_month, 1);
+    v_trend_from := (v_trend_to - interval '5 months')::date;
   END IF;
 
   RETURN jsonb_build_object(
@@ -131,8 +142,8 @@ BEGIN
           ) AS row_data
         FROM (
           SELECT generate_series(
-            date_trunc('month', CURRENT_DATE - interval '5 months'),
-            date_trunc('month', CURRENT_DATE),
+            v_trend_from,
+            v_trend_to,
             interval '1 month'
           )::date AS month_start
         ) ms
@@ -177,6 +188,7 @@ BEGIN
         JOIN  work_orders         wo ON wo.work_order_id = i.work_order_id
         JOIN  contractor_profiles cp ON cp.cr_number     = wo.contractor_cr
         WHERE i.status = 'SUBMITTED'
+          AND wo.allocation_date BETWEEN v_from_date AND v_to_date
         ORDER BY i.submitted_at DESC
         LIMIT 10
       ) sub
@@ -208,4 +220,3 @@ BEGIN
 
   ); -- end RETURN
 END;
-$$;

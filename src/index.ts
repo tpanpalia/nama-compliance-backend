@@ -1,6 +1,9 @@
 // Must be first — loads .env.{NODE_ENV} before any other imports
 import './config'
 
+// BigInt → JSON serialisation (Prisma returns BigInt for large int columns)
+;(BigInt.prototype as any).toJSON = function () { return Number(this) }
+
 import express from 'express'
 import cors from 'cors'
 import helmet from 'helmet'

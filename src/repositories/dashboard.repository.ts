@@ -20,4 +20,9 @@ export const dashboardRepository = {
     prisma.$queryRaw<[Record<string, unknown>]>`
       SELECT get_inspector_workload(${from}::date, ${to}::date)
     `,
+
+  getContractorsSummary: () =>
+    prisma.$queryRaw<[Record<string, unknown>]>`
+      SELECT get_contractors_summary()
+    `,
 }
