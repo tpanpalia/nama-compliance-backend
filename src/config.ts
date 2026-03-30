@@ -22,7 +22,7 @@ export const config = {
 
   db: {
     url: required('DATABASE_URL'),
-    directUrl: required('DIRECT_URL'),
+    directUrl: optional('DIRECT_URL'),
   },
 
   jwt: {

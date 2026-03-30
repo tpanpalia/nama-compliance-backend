@@ -18,7 +18,18 @@ import { errorHandler } from './middleware/errorHandler'
 const app = express()
 
 // ── Security & parsing ────────────────────────────────────
-app.use(helmet())
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc:  ["'self'"],
+      scriptSrc:   ["'self'", "'unsafe-inline'", "'unsafe-eval'"],
+      styleSrc:    ["'self'", "'unsafe-inline'"],
+      imgSrc:      ["'self'", "data:", "https:"],
+      connectSrc:  ["'self'", "https:"],
+    },
+  },
+  crossOriginEmbedderPolicy: false,
+}))
 app.use(cors({
   origin:      config.corsOrigin,
   credentials: true,
@@ -32,10 +43,17 @@ app.get('/health', (_req, res) => {
 })
 
 // ── Swagger UI ────────────────────────────────────────────
-const swaggerDoc = yaml.load(
-  fs.readFileSync(path.join(__dirname, '../docs/openapi.yaml'), 'utf8')
-) as object
-app.use('/api/docs', swaggerUi.serve, swaggerUi.setup(swaggerDoc))
+// Try multiple paths: works locally (process.cwd) and on Vercel (__dirname)
+const docsCandidates = [
+  path.join(process.cwd(), 'docs/openapi.yaml'),
+  path.join(__dirname, '../docs/openapi.yaml'),
+  path.join(__dirname, '../../docs/openapi.yaml'),
+]
+const docsPath = docsCandidates.find((p) => fs.existsSync(p))
+if (docsPath) {
+  const swaggerDoc = yaml.load(fs.readFileSync(docsPath, 'utf8')) as object
+  app.use('/api/docs', swaggerUi.serve, swaggerUi.setup(swaggerDoc))
+}
 
 // ── API routes ────────────────────────────────────────────
 app.use('/api', routes)
@@ -48,9 +66,11 @@ app.use((_req, res) => {
 // ── Global error handler (must be last) ───────────────────
 app.use(errorHandler)
 
-// ── Start ─────────────────────────────────────────────────
-app.listen(config.port, () => {
-  console.log(`[${config.env}] Server running on port ${config.port}`)
-})
+// ── Start (only when running directly, not in serverless) ─
+if (!process.env.VERCEL) {
+  app.listen(config.port, () => {
+    console.log(`[${config.env}] Server running on port ${config.port}`)
+  })
+}
 
 export default app

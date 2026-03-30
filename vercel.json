@@ -1,0 +1,15 @@
+{
+  "version": 2,
+  "buildCommand": "npx prisma generate && tsc",
+  "outputDirectory": ".",
+  "functions": {
+    "api/index.ts": {
+      "runtime": "@vercel/node@3",
+      "maxDuration": 30,
+      "includeFiles": "docs/**"
+    }
+  },
+  "rewrites": [
+    { "source": "/(.*)", "destination": "/api" }
+  ]
+}
