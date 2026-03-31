@@ -20,6 +20,7 @@ const updateSchema = z.object({
   description:          z.string().optional(),
   priority:             z.nativeEnum(WorkOrderPriority).optional(),
   targetCompletionDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  contractorCr:         z.string().min(1).optional(),
 }).strict()
 
 const assignSchema = z.object({ inspectorId: z.string().uuid() })

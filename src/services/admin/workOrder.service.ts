@@ -174,9 +174,19 @@ export const adminWorkOrderService = {
     description?: string
     priority?: WorkOrderPriority
     targetCompletionDate?: string
+    contractorCr?: string
   }) => {
     const wo = await workOrderRepository.findById(workOrderId)
     if (!wo) throw new AppError(404, 'Work order not found')
+
+    if (data.contractorCr) {
+      const allowedForReassign: WorkOrderStatus[] = ['UNASSIGNED', 'ASSIGNED']
+      if (!allowedForReassign.includes(wo.status)) {
+        throw new AppError(400, `Cannot reassign contractor when work order is ${wo.status}`)
+      }
+      const contractor = await contractorRepository.findByCr(data.contractorCr)
+      if (!contractor) throw new AppError(404, 'Contractor not found')
+    }
 
     const updated = await workOrderRepository.update(workOrderId, {
       ...data,
@@ -187,8 +197,8 @@ export const adminWorkOrderService = {
       performedBy,
       entityType: 'WORK_ORDER',
       entityId:   workOrderId,
-      action:     'UPDATED',
-      metadata:   data,
+      action:     data.contractorCr ? 'REASSIGNED' : 'UPDATED',
+      metadata:   { ...data, previousContractorCr: data.contractorCr ? wo.contractorCr : undefined },
     })
 
     return updated
