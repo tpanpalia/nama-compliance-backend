@@ -103,6 +103,7 @@ export const contractorWorkOrderService = {
     gpsLat?:         number
     gpsLng?:         number
     gpsAccuracy?:    number
+    gpsAddress?:     string
     capturedAt?:     string
   }) => {
     const profile = await contractorRepository.findByUserId(userId)
@@ -131,6 +132,7 @@ export const contractorWorkOrderService = {
       gpsLat:          data.gpsLat,
       gpsLng:          data.gpsLng,
       gpsAccuracy:     data.gpsAccuracy,
+      gpsAddress:      data.gpsAddress,
       capturedAt:      data.capturedAt ? new Date(data.capturedAt) : undefined,
     })
   },

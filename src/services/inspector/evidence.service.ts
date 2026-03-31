@@ -13,6 +13,7 @@ export const inspectorEvidenceService = {
     gpsLat?:         number
     gpsLng?:         number
     gpsAccuracy?:    number
+    gpsAddress?:     string
     capturedAt?:     string
   }) => {
     const inspection = await inspectionRepository.findByIdForEvidence(data.inspectionId)
@@ -39,6 +40,7 @@ export const inspectorEvidenceService = {
       gpsLat:          data.gpsLat,
       gpsLng:          data.gpsLng,
       gpsAccuracy:     data.gpsAccuracy,
+      gpsAddress:      data.gpsAddress,
       capturedAt:      data.capturedAt ? new Date(data.capturedAt) : undefined,
     })
   },

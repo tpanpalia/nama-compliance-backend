@@ -10,6 +10,7 @@ const evidenceSchema = z.object({
   gpsLat:          z.number().optional(),
   gpsLng:          z.number().optional(),
   gpsAccuracy:     z.number().optional(),
+  gpsAddress:      z.string().optional(),
   capturedAt:      z.string().datetime().optional(),
 })
 
