@@ -337,6 +337,7 @@ model ChecklistItem {
   category    ChecklistCategory
   weight      Int               // within-category weight, items per category must sum to 100
   order       Int               // display order within category
+  mandatory   Boolean           @default(true)
   isActive    Boolean           @default(true) @map("is_active")
   createdAt   DateTime          @default(now()) @map("created_at") @db.Timestamptz
   updatedAt   DateTime          @updatedAt @map("updated_at") @db.Timestamptz

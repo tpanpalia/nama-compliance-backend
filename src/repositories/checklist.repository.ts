@@ -20,6 +20,9 @@ export const checklistRepository = {
   create: (data: Parameters<typeof prisma.checklistItem.create>[0]['data']) =>
     prisma.checklistItem.create({ data }),
 
+  update: (id: string, data: { question?: string; weight?: number; order?: number; mandatory?: boolean; isActive?: boolean }) =>
+    prisma.checklistItem.update({ where: { id }, data }),
+
   deactivate: (id: string) =>
     prisma.checklistItem.update({ where: { id }, data: { isActive: false } }),
 

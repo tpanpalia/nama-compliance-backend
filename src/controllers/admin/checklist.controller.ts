@@ -5,11 +5,13 @@ import { checklistService } from '../../services/admin/checklist.service'
 import { qs } from '../../utils/query'
 
 const createSchema = z.object({
-  id:       z.string().regex(/^[A-Z]+-\d{3}$/, 'ID must match pattern like HSE-001'),
-  question: z.string().min(5),
-  category: z.nativeEnum(ChecklistCategory),
-  weight:   z.number().int().min(1).max(100),
-  order:    z.number().int().min(1),
+  id:        z.string().regex(/^[A-Z]+-\d{3}$/, 'ID must match pattern like HSE-001'),
+  question:  z.string().min(5),
+  category:  z.nativeEnum(ChecklistCategory),
+  weight:    z.number().int().min(1).max(100),
+  order:     z.number().int().min(1),
+  mandatory: z.boolean().optional().default(true),
+  isActive:  z.boolean().optional().default(true),
 })
 
 export const list = async (req: Request, res: Response, next: NextFunction) => {
@@ -26,7 +28,7 @@ export const create = async (req: Request, res: Response, next: NextFunction) =>
   try {
     const data   = createSchema.parse(req.body)
     const result = await checklistService.create(req.user!.userId, data)
-    res.status(201).json(result)
+    res.json(result)
   } catch (err) { next(err) }
 }
 

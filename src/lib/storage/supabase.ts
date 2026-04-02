@@ -52,6 +52,13 @@ export class SupabaseAdapter implements StorageService {
     return data.signedUrl
   }
 
+  async upload(s3Key: string, buffer: Buffer, mimeType: string): Promise<void> {
+    const { error } = await this.client.storage
+      .from(this.bucket)
+      .upload(s3Key, buffer, { contentType: mimeType, upsert: true })
+    if (error) throw new Error(`Supabase upload failed: ${error.message}`)
+  }
+
   async delete(s3Key: string): Promise<void> {
     const { error } = await this.client.storage
       .from(this.bucket)

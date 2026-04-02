@@ -44,6 +44,7 @@ const CHECKLIST_ITEMS = [
     category: ChecklistCategory.HSE,
     weight: 40,
     order: 1,
+    mandatory: true,
   },
   {
     id: 'HSE-002',
@@ -51,6 +52,7 @@ const CHECKLIST_ITEMS = [
     category: ChecklistCategory.HSE,
     weight: 30,
     order: 2,
+    mandatory: true,
   },
   {
     id: 'HSE-003',
@@ -58,6 +60,7 @@ const CHECKLIST_ITEMS = [
     category: ChecklistCategory.HSE,
     weight: 30,
     order: 3,
+    mandatory: true,
   },
 
   // --- Technical Installation (7 items) ---
@@ -67,6 +70,7 @@ const CHECKLIST_ITEMS = [
     category: ChecklistCategory.TECHNICAL,
     weight: 16,
     order: 1,
+    mandatory: true,
   },
   {
     id: 'TECH-002',
@@ -74,6 +78,7 @@ const CHECKLIST_ITEMS = [
     category: ChecklistCategory.TECHNICAL,
     weight: 14,
     order: 2,
+    mandatory: true,
   },
   {
     id: 'TECH-003',
@@ -81,6 +86,7 @@ const CHECKLIST_ITEMS = [
     category: ChecklistCategory.TECHNICAL,
     weight: 16,
     order: 3,
+    mandatory: true,
   },
   {
     id: 'TECH-004',
@@ -88,6 +94,7 @@ const CHECKLIST_ITEMS = [
     category: ChecklistCategory.TECHNICAL,
     weight: 14,
     order: 4,
+    mandatory: true,
   },
   {
     id: 'TECH-005',
@@ -95,6 +102,7 @@ const CHECKLIST_ITEMS = [
     category: ChecklistCategory.TECHNICAL,
     weight: 18,
     order: 5,
+    mandatory: true,
   },
   {
     id: 'TECH-006',
@@ -102,6 +110,7 @@ const CHECKLIST_ITEMS = [
     category: ChecklistCategory.TECHNICAL,
     weight: 12,
     order: 6,
+    mandatory: true,
   },
   {
     id: 'TECH-007',
@@ -109,6 +118,7 @@ const CHECKLIST_ITEMS = [
     category: ChecklistCategory.TECHNICAL,
     weight: 10,
     order: 7,
+    mandatory: true,
   },
 
   // --- Process & Communication (3 items) ---
@@ -118,6 +128,7 @@ const CHECKLIST_ITEMS = [
     category: ChecklistCategory.PROCESS,
     weight: 38,
     order: 1,
+    mandatory: true,
   },
   {
     id: 'PROC-002',
@@ -125,6 +136,7 @@ const CHECKLIST_ITEMS = [
     category: ChecklistCategory.PROCESS,
     weight: 33,
     order: 2,
+    mandatory: true,
   },
   {
     id: 'PROC-003',
@@ -132,6 +144,7 @@ const CHECKLIST_ITEMS = [
     category: ChecklistCategory.PROCESS,
     weight: 29,
     order: 3,
+    mandatory: true,
   },
 
   // --- Site Closure (1 item) ---
@@ -141,6 +154,7 @@ const CHECKLIST_ITEMS = [
     category: ChecklistCategory.CLOSURE,
     weight: 100,
     order: 1,
+    mandatory: true,
   },
 ]
 
@@ -237,6 +251,7 @@ async function main() {
       category: item.category,
       weight: item.weight,
       order: item.order,
+      mandatory: item.mandatory,
       isActive: true,
     }))
     await prisma.checklistVersion.create({

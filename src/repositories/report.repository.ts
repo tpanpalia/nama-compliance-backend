@@ -11,4 +11,7 @@ export const reportRepository = {
 
   countExports: () =>
     prisma.reportExport.count(),
+
+  createExport: (data: Parameters<typeof prisma.reportExport.create>[0]['data']) =>
+    prisma.reportExport.create({ data }),
 }

@@ -22,6 +22,9 @@ export interface StorageService {
   /** Delete a file from storage */
   delete(s3Key: string): Promise<void>
 
+  /** Upload a buffer directly to storage */
+  upload(s3Key: string, buffer: Buffer, mimeType: string): Promise<void>
+
   /** Build the permanent storage key for a file */
   buildKey(category: string, fileId: string, filename: string): string
 }

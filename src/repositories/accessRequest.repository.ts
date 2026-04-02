@@ -3,10 +3,16 @@ import { Prisma } from '@prisma/client'
 
 export const accessRequestRepository = {
   findById: (id: string) =>
-    prisma.accessRequest.findUnique({ where: { id } }),
+    prisma.accessRequest.findUnique({
+      where: { id },
+      include: { reviewer: { select: { staffProfile: { select: { fullName: true } } } } },
+    }),
 
   findByIdWithFile: (id: string) =>
-    prisma.accessRequest.findUnique({ where: { id }, include: { documentFile: true } }),
+    prisma.accessRequest.findUnique({
+      where: { id },
+      include: { documentFile: true, reviewer: { select: { staffProfile: { select: { fullName: true } } } } },
+    }),
 
   findPendingByEmail: (email: string) =>
     prisma.accessRequest.findFirst({ where: { email, status: 'PENDING' } }),
@@ -14,7 +20,10 @@ export const accessRequestRepository = {
   findMany: (params: { where: Prisma.AccessRequestWhereInput; skip: number; take: number }) =>
     prisma.accessRequest.findMany({
       where:   params.where,
-      include: { documentFile: { select: { s3Key: true, mimeType: true } } },
+      include: {
+        documentFile: { select: { s3Key: true, mimeType: true } },
+        reviewer: { select: { staffProfile: { select: { fullName: true } } } },
+      },
       orderBy: { requestDate: 'desc' },
       skip:    params.skip,
       take:    params.take,

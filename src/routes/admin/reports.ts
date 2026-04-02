@@ -6,5 +6,6 @@ const router = Router()
 router.get('/inspector-workload',  reportController.inspectorWorkload)
 router.get('/exports',             reportController.listExports)
 router.get('/governorates',        reportController.governorates)
+router.post('/generate',           reportController.generate)
 
 export default router
