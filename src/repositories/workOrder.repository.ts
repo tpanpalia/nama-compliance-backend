@@ -77,7 +77,7 @@ export const workOrderRepository = {
         contractor:        { select: { companyName: true } },
         assignedInspector: { select: { staffProfile: { select: { fullName: true } } } },
         governorate:       true,
-        inspection:        { select: { finalScore: true, complianceRating: true, status: true } },
+        inspection:        { select: { finalScore: true, complianceRating: true, status: true, submittedAt: true } },
       },
       orderBy: { createdAt: 'desc' },
       skip:    params.skip,
