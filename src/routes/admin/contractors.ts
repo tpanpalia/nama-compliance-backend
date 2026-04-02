@@ -4,6 +4,7 @@ import * as contractorController from '../../controllers/admin/contractor.contro
 const router = Router()
 
 router.get('/',                     contractorController.list)
+router.get('/summary',              contractorController.getSummary)
 router.get('/:cr',                  contractorController.getById)
 router.get('/:cr/performance',      contractorController.getPerformance)
 router.patch('/:cr/status',         contractorController.updateStatus)

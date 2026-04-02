@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from 'express'
 import { z } from 'zod'
 import { adminContractorService } from '../../services/admin/contractor.service'
+import { dashboardRepository } from '../../repositories/dashboard.repository'
 import { qs, qsDefault } from '../../utils/query'
 
 const statusSchema = z.object({
@@ -37,6 +38,13 @@ export const getPerformance = async (req: Request, res: Response, next: NextFunc
     const { year, month } = perfQuerySchema.parse(req.query)
     const result = await adminContractorService.getPerformance(req.params.cr, year, month)
     res.json(result)
+  } catch (err) { next(err) }
+}
+
+export const getSummary = async (_req: Request, res: Response, next: NextFunction) => {
+  try {
+    const result = await dashboardRepository.getContractorsSummary()
+    res.json((result[0] as Record<string, unknown>)['get_contractors_summary'])
   } catch (err) { next(err) }
 }
 

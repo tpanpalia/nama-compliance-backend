@@ -212,6 +212,7 @@ model ContractorProfile {
   contactName        String    @map("contact_name")
   email              String    @unique
   phone              String
+  address            String?
   regionsOfOperation String[]  @default([]) @map("regions_of_operation")
   createdAt          DateTime  @default(now()) @map("created_at") @db.Timestamptz
   updatedAt          DateTime  @updatedAt @map("updated_at") @db.Timestamptz
