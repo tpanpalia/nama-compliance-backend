@@ -46,4 +46,8 @@ export const config = {
       bucket: optional('AWS_S3_BUCKET'),
     },
   },
+  resend: {
+    apiKey: optional('RESEND_API_KEY', ''),
+    fromEmail: optional('RESEND_FROM_EMAIL', 'noreply@nama.om'),
+  },
 } as const

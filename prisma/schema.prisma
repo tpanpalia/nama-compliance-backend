@@ -595,3 +595,20 @@ model ReportExport {
   @@index([generatedAt])
   @@map("report_exports")
 }
+
+// ============================================================
+// PASSWORD RESET OTP
+// ============================================================
+
+model PasswordResetOtp {
+  id        String   @id @default(uuid())
+  email     String
+  otp       String
+  expiresAt DateTime @map("expires_at") @db.Timestamptz
+  used      Boolean  @default(false)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  @@index([email, otp])
+  @@index([expiresAt])
+  @@map("password_reset_otps")
+}

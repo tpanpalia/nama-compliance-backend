@@ -4,6 +4,8 @@ import { userRepository } from '../repositories/user.repository'
 import { signAccessToken, signRefreshToken, verifyRefreshToken } from '../lib/jwt'
 import { generateRequestId } from '../utils/ids'
 import { accessRequestRepository } from '../repositories/accessRequest.repository'
+import { prisma } from '../lib/prisma'
+import { sendOtpEmail } from '../lib/email'
 
 export const authService = {
   login: async (email: string, password: string) => {
@@ -124,5 +126,61 @@ export const authService = {
     const hash = await bcrypt.hash(newPassword, 12)
     await userRepository.updatePassword(userId, hash)
     return { message: 'Password updated' }
+  },
+
+  forgotPassword: async (email: string) => {
+    const user = await userRepository.findByEmail(email.toLowerCase())
+    if (!user) return { ok: true } // Don't reveal if email exists
+
+    // Generate 6-digit OTP
+    const otp = String(Math.floor(100000 + Math.random() * 900000))
+    const expiresAt = new Date(Date.now() + 10 * 60 * 1000) // 10 minutes
+
+    // Invalidate previous OTPs for this email
+    await prisma.passwordResetOtp.updateMany({
+      where: { email: email.toLowerCase(), used: false },
+      data: { used: true },
+    })
+
+    // Store new OTP
+    await prisma.passwordResetOtp.create({
+      data: { email: email.toLowerCase(), otp, expiresAt },
+    })
+
+    // Send email
+    await sendOtpEmail(email.toLowerCase(), otp)
+
+    return { ok: true }
+  },
+
+  verifyOtp: async (email: string, otp: string) => {
+    const record = await prisma.passwordResetOtp.findFirst({
+      where: { email: email.toLowerCase(), otp, used: false, expiresAt: { gt: new Date() } },
+      orderBy: { createdAt: 'desc' },
+    })
+    if (!record) throw new AppError(400, 'Invalid or expired OTP')
+    return { ok: true, valid: true }
+  },
+
+  resetPassword: async (email: string, otp: string, newPassword: string) => {
+    const record = await prisma.passwordResetOtp.findFirst({
+      where: { email: email.toLowerCase(), otp, used: false, expiresAt: { gt: new Date() } },
+      orderBy: { createdAt: 'desc' },
+    })
+    if (!record) throw new AppError(400, 'Invalid or expired OTP')
+
+    const user = await userRepository.findByEmail(email.toLowerCase())
+    if (!user) throw new AppError(404, 'User not found')
+
+    const hash = await bcrypt.hash(newPassword, 12)
+    await userRepository.updatePassword(user.id, hash)
+
+    // Mark OTP as used
+    await prisma.passwordResetOtp.update({
+      where: { id: record.id },
+      data: { used: true },
+    })
+
+    return { ok: true }
   },
 }
