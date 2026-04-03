@@ -16,7 +16,9 @@ export const contractorWorkOrderService = {
     const skip  = (params.page - 1) * params.limit
     const where = {
       contractorCr: profile.crNumber,
-      ...(params.status ? { status: params.status as WorkOrderStatus } : {}),
+      status: params.status
+        ? (params.status as WorkOrderStatus)
+        : { not: 'UNASSIGNED' as WorkOrderStatus },
     }
 
     const [items, total] = await Promise.all([

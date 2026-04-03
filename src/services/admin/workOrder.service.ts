@@ -44,30 +44,23 @@ export const adminWorkOrderService = {
   },
 
   create: async (performedBy: string, data: {
-    contractorCr: string
     governorateCode: string
     siteName: string
     description?: string
     priority: WorkOrderPriority
     allocationDate: string
     targetCompletionDate: string
-    assignedInspectorId?: string
   }) => {
-    const contractor = await contractorRepository.findByCr(data.contractorCr)
-    if (!contractor) throw new AppError(404, 'Contractor not found')
-
     const gov = await governorateRepository.findByCode(data.governorateCode)
     if (!gov) throw new AppError(404, 'Governorate not found')
 
     const weights = await scoringRepository.findActive()
     if (!weights) throw new AppError(500, 'No active scoring weights found')
 
-    const id     = await generateWorkOrderId()
-    const status: WorkOrderStatus = data.assignedInspectorId ? 'ASSIGNED' : 'UNASSIGNED'
+    const id = await generateWorkOrderId()
 
     const workOrder = await workOrderRepository.create({
       id,
-      contractorCr:         data.contractorCr,
       governorateCode:      data.governorateCode,
       siteName:             data.siteName,
       description:          data.description,
@@ -75,8 +68,7 @@ export const adminWorkOrderService = {
       allocationDate:       new Date(data.allocationDate),
       targetCompletionDate: new Date(data.targetCompletionDate),
       scoringWeightsId:     weights.id,
-      status,
-      assignedInspectorId:  data.assignedInspectorId,
+      status:               'UNASSIGNED',
     })
 
     await auditLogRepository.create({
@@ -84,18 +76,8 @@ export const adminWorkOrderService = {
       entityType: 'WORK_ORDER',
       entityId:   id,
       action:     'CREATED',
-      metadata:   { contractorCr: data.contractorCr, status },
+      metadata:   { status: 'UNASSIGNED' },
     })
-
-    if (data.assignedInspectorId) {
-      await notificationRepository.create({
-        userId:      data.assignedInspectorId,
-        type:        'WORK_ORDER_ASSIGNED',
-        title:       'New Work Order Assigned',
-        message:     `Work order ${id} has been assigned to you.`,
-        workOrderId: id,
-      })
-    }
 
     return workOrder
   },
@@ -182,14 +164,18 @@ export const adminWorkOrderService = {
     if (data.contractorCr) {
       const allowedForReassign: WorkOrderStatus[] = ['UNASSIGNED', 'ASSIGNED']
       if (!allowedForReassign.includes(wo.status)) {
-        throw new AppError(400, `Cannot reassign contractor when work order is ${wo.status}`)
+        throw new AppError(400, `Cannot assign/reassign contractor when work order is ${wo.status}`)
       }
       const contractor = await contractorRepository.findByCr(data.contractorCr)
       if (!contractor) throw new AppError(404, 'Contractor not found')
     }
 
+    // When assigning contractor to UNASSIGNED WO, change status to ASSIGNED
+    const statusUpdate = data.contractorCr && wo.status === 'UNASSIGNED' ? { status: 'ASSIGNED' as WorkOrderStatus } : {}
+
     const updated = await workOrderRepository.update(workOrderId, {
       ...data,
+      ...statusUpdate,
       ...(data.targetCompletionDate ? { targetCompletionDate: new Date(data.targetCompletionDate) } : {}),
     })
 
