@@ -3,6 +3,7 @@ import * as contractorController from '../../controllers/admin/contractor.contro
 
 const router = Router()
 
+router.post('/',                    contractorController.create)
 router.get('/',                     contractorController.list)
 router.get('/summary',              contractorController.getSummary)
 router.get('/:cr',                  contractorController.getById)
