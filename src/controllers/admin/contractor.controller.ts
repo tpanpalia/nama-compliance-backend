@@ -66,6 +66,23 @@ export const getSummary = async (_req: Request, res: Response, next: NextFunctio
   } catch (err) { next(err) }
 }
 
+const updateSchema = z.object({
+  companyName:        z.string().min(1).optional(),
+  contactName:        z.string().min(1).optional(),
+  email:              z.string().email().optional(),
+  phone:              z.string().min(1).optional(),
+  address:            z.string().optional(),
+  regionsOfOperation: z.array(z.string()).optional(),
+})
+
+export const update = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const data = updateSchema.parse(req.body)
+    const result = await adminContractorService.update(req.user!.userId, req.params.cr, data)
+    res.json(result)
+  } catch (err) { next(err) }
+}
+
 export const updateStatus = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { status, reason } = statusSchema.parse(req.body)

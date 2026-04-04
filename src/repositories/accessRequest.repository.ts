@@ -50,4 +50,18 @@ export const accessRequestRepository = {
         status: 'REJECTED', rejectionReason: reason, reviewedBy, reviewedAt: new Date(), verificationStatus: 'REJECTED',
       },
     }),
+
+  deactivate: (id: string, reviewedBy: string) =>
+    prisma.accessRequest.update({
+      where: { id },
+      data: {
+        status: 'DEACTIVATED', reviewedBy, reviewedAt: new Date(),
+      },
+    }),
+
+  updateVerificationStatus: (id: string, verificationStatus: 'VERIFIED' | 'REJECTED') =>
+    prisma.accessRequest.update({
+      where: { id },
+      data: { verificationStatus },
+    }),
 }

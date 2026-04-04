@@ -118,4 +118,48 @@ export const accessRequestService = {
 
     return { ok: true }
   },
+
+  deactivate: async (performedBy: string, requestId: string) => {
+    const request = await accessRequestRepository.findById(requestId)
+    if (!request) throw new AppError(404, 'Access request not found')
+    if (request.status !== 'APPROVED') throw new AppError(400, 'Only approved requests can be deactivated')
+
+    // Find the user created from this access request by email
+    const user = await userRepository.findByEmail(request.email)
+    if (!user) throw new AppError(404, 'No user found for this access request')
+
+    // Suspend the user
+    await userRepository.updateStatus(user.id, 'SUSPENDED')
+
+    // Mark the access request as deactivated
+    await accessRequestRepository.deactivate(requestId, performedBy)
+
+    await auditLogRepository.create({
+      performedBy,
+      entityType: 'ACCESS_REQUEST',
+      entityId:   requestId,
+      action:     'DEACTIVATED',
+      metadata:   { userId: user.id, email: request.email },
+    })
+
+    return { ok: true }
+  },
+
+  verifyDocument: async (performedBy: string, requestId: string, verificationStatus: 'VERIFIED' | 'REJECTED') => {
+    const request = await accessRequestRepository.findById(requestId)
+    if (!request) throw new AppError(404, 'Access request not found')
+    if (request.status !== 'PENDING') throw new AppError(400, 'Can only verify documents on pending requests')
+
+    await accessRequestRepository.updateVerificationStatus(requestId, verificationStatus)
+
+    await auditLogRepository.create({
+      performedBy,
+      entityType: 'ACCESS_REQUEST',
+      entityId:   requestId,
+      action:     `DOCUMENT_${verificationStatus}`,
+      metadata:   { verificationStatus },
+    })
+
+    return { ok: true, verificationStatus }
+  },
 }

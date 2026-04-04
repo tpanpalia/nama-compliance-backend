@@ -8,6 +8,7 @@ router.get('/',                     contractorController.list)
 router.get('/summary',              contractorController.getSummary)
 router.get('/:cr',                  contractorController.getById)
 router.get('/:cr/performance',      contractorController.getPerformance)
+router.patch('/:cr',                contractorController.update)
 router.patch('/:cr/status',         contractorController.updateStatus)
 
 export default router

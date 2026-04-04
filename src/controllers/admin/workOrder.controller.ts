@@ -30,6 +30,7 @@ export const list = async (req: Request, res: Response, next: NextFunction) => {
       contractorCr:    qs(req.query.contractorCr),
       inspectorId:     qs(req.query.inspectorId),
       governorateCode: qs(req.query.governorateCode),
+      search:          qs(req.query.search),
       page:            parseInt(qsDefault(req.query.page,  '1'),  10),
       limit:           parseInt(qsDefault(req.query.limit, '20'), 10),
     })
@@ -75,11 +76,7 @@ const bulkImportSchema = z.object({
 export const bulkImport = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { workOrders } = bulkImportSchema.parse(req.body)
-    const results = []
-    for (const wo of workOrders) {
-      const result = await adminWorkOrderService.create(req.user!.userId, wo)
-      results.push(result)
-    }
+    const results = await adminWorkOrderService.bulkCreate(req.user!.userId, workOrders)
     res.status(201).json({ ok: true, imported: results.length })
   } catch (err) { next(err) }
 }
@@ -88,6 +85,16 @@ export const update = async (req: Request, res: Response, next: NextFunction) =>
   try {
     const data   = updateSchema.parse(req.body)
     const result = await adminWorkOrderService.update(req.user!.userId, req.params.id, data)
+    res.json(result)
+  } catch (err) { next(err) }
+}
+
+const reopenSchema = z.object({ reason: z.string().min(1, 'Reason is required') })
+
+export const reopen = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { reason } = reopenSchema.parse(req.body)
+    const result = await adminWorkOrderService.reopen(req.user!.userId, req.params.id, reason)
     res.json(result)
   } catch (err) { next(err) }
 }

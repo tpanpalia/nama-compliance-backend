@@ -8,7 +8,10 @@ const createSchema = z.object({
   processPercent:   z.number().int().min(1).max(100),
   closurePercent:   z.number().int().min(1).max(100),
   effectiveFrom:    z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-})
+}).refine(
+  (data) => data.hsePercent + data.technicalPercent + data.processPercent + data.closurePercent === 100,
+  { message: 'Scoring weights must sum to exactly 100' },
+)
 
 export const list = async (req: Request, res: Response, next: NextFunction) => {
   try {

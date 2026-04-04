@@ -132,6 +132,13 @@ export const authService = {
     const user = await userRepository.findByEmail(email.toLowerCase())
     if (!user) return { ok: true } // Don't reveal if email exists
 
+    // Rate limit: max 3 OTPs per email per hour
+    const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000)
+    const recentCount = await prisma.passwordResetOtp.count({
+      where: { email: email.toLowerCase(), createdAt: { gt: oneHourAgo } },
+    })
+    if (recentCount >= 3) throw new AppError(429, 'Too many OTP requests. Please try again later.')
+
     // Generate 6-digit OTP
     const otp = String(Math.floor(100000 + Math.random() * 900000))
     const expiresAt = new Date(Date.now() + 10 * 60 * 1000) // 10 minutes

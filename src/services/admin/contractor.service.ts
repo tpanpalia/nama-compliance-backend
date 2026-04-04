@@ -108,6 +108,30 @@ export const adminContractorService = {
     return (result[0] as Record<string, unknown>)['get_contractor_performance']
   },
 
+  update: async (performedBy: string, cr: string, data: {
+    companyName?: string
+    contactName?: string
+    email?: string
+    phone?: string
+    address?: string
+    regionsOfOperation?: string[]
+  }) => {
+    const contractor = await contractorRepository.findByCr(cr)
+    if (!contractor) throw new AppError(404, 'Contractor not found')
+
+    const updated = await contractorRepository.update(cr, data)
+
+    await auditLogRepository.create({
+      performedBy,
+      entityType: 'CONTRACTOR',
+      entityId:   cr,
+      action:     'UPDATED',
+      metadata:   data,
+    })
+
+    return updated
+  },
+
   updateStatus: async (performedBy: string, cr: string, status: string, reason?: string) => {
     const contractor = await contractorRepository.findByCrWithUser(cr)
     if (!contractor) throw new AppError(404, 'Contractor not found')

@@ -18,15 +18,24 @@ export const adminWorkOrderService = {
     contractorCr?: string
     inspectorId?: string
     governorateCode?: string
+    search?: string
     page: number
     limit: number
   }) => {
     const skip  = (params.page - 1) * params.limit
-    const where = {
+    const where: any = {
       ...(params.status          ? { status: params.status as WorkOrderStatus }           : {}),
       ...(params.contractorCr    ? { contractorCr: params.contractorCr }                  : {}),
       ...(params.inspectorId     ? { assignedInspectorId: params.inspectorId }            : {}),
       ...(params.governorateCode ? { governorateCode: params.governorateCode }            : {}),
+      ...(params.search ? {
+        OR: [
+          { id: { contains: params.search, mode: 'insensitive' } },
+          { contractorCr: { contains: params.search, mode: 'insensitive' } },
+          { contractor: { companyName: { contains: params.search, mode: 'insensitive' } } },
+          { assignedInspector: { staffProfile: { fullName: { contains: params.search, mode: 'insensitive' } } } },
+        ],
+      } : {}),
     }
 
     const [items, total] = await Promise.all([
@@ -80,6 +89,80 @@ export const adminWorkOrderService = {
     })
 
     return workOrder
+  },
+
+  bulkCreate: async (performedBy: string, workOrders: {
+    governorateCode: string
+    siteName: string
+    description?: string
+    workType?: string
+    priority: WorkOrderPriority
+    allocationDate: string
+    targetCompletionDate: string
+  }[]) => {
+    // Validate all governorates upfront
+    const govCodes = [...new Set(workOrders.map((wo) => wo.governorateCode))]
+    for (const code of govCodes) {
+      const gov = await governorateRepository.findByCode(code)
+      if (!gov) throw new AppError(400, `Governorate not found: ${code}`)
+    }
+
+    const weights = await scoringRepository.findActive()
+    if (!weights) throw new AppError(500, 'No active scoring weights found')
+
+    // Pre-generate all IDs sequentially to avoid conflicts
+    const ids: string[] = []
+    const today = new Date()
+    const datePart = today.toISOString().slice(0, 10).replace(/-/g, '')
+    const prefix = `WO-${datePart}-`
+    const last = await prisma.workOrder.findFirst({
+      where: { id: { startsWith: prefix } },
+      orderBy: { id: 'desc' },
+      select: { id: true },
+    })
+    let seq = 1
+    if (last) {
+      const parts = last.id.split('-')
+      seq = parseInt(parts[parts.length - 1], 10) + 1
+    }
+    for (let i = 0; i < workOrders.length; i++) {
+      ids.push(`${prefix}${String(seq + i).padStart(4, '0')}`)
+    }
+
+    // Wrap all creates in a single transaction
+    const results = await prisma.$transaction(async (tx) => {
+      const created = []
+      for (let i = 0; i < workOrders.length; i++) {
+        const data = workOrders[i]
+        const id = ids[i]
+        const workOrder = await tx.workOrder.create({
+          data: {
+            id,
+            governorateCode:      data.governorateCode,
+            siteName:             data.siteName,
+            description:          data.description,
+            priority:             data.priority,
+            allocationDate:       new Date(data.allocationDate),
+            targetCompletionDate: new Date(data.targetCompletionDate),
+            scoringWeightsId:     weights.id,
+            status:               'UNASSIGNED',
+          },
+        })
+        await tx.auditLog.create({
+          data: {
+            performedBy,
+            entityType: 'WORK_ORDER',
+            entityId:   id,
+            action:     'CREATED',
+            metadata:   { status: 'UNASSIGNED', bulkImport: true },
+          },
+        })
+        created.push(workOrder)
+      }
+      return created
+    })
+
+    return results
   },
 
   assign: async (performedBy: string, workOrderId: string, inspectorId: string) => {
@@ -186,6 +269,44 @@ export const adminWorkOrderService = {
       action:     data.contractorCr ? 'REASSIGNED' : 'UPDATED',
       metadata:   { ...data, previousContractorCr: data.contractorCr ? wo.contractorCr : undefined },
     })
+
+    return updated
+  },
+
+  reopen: async (performedBy: string, workOrderId: string, reason: string) => {
+    const wo = await workOrderRepository.findById(workOrderId)
+    if (!wo) throw new AppError(404, 'Work order not found')
+
+    const allowedStatuses: WorkOrderStatus[] = ['SUBMITTED', 'PENDING_INSPECTION']
+    if (!allowedStatuses.includes(wo.status)) {
+      throw new AppError(400, `Cannot reopen work order when status is ${wo.status}`)
+    }
+
+    const updated = await workOrderRepository.update(workOrderId, {
+      status: 'IN_PROGRESS' as WorkOrderStatus,
+    })
+
+    await auditLogRepository.create({
+      performedBy,
+      entityType: 'WORK_ORDER',
+      entityId:   workOrderId,
+      action:     'REOPENED',
+      metadata:   { previousStatus: wo.status, reason },
+    })
+
+    // Notify the contractor if one is assigned
+    if (wo.contractorCr) {
+      const contractor = await contractorRepository.findByCr(wo.contractorCr)
+      if (contractor?.userId) {
+        await notificationRepository.create({
+          userId:      contractor.userId,
+          type:        'WORK_ORDER_ASSIGNED',
+          title:       'Work Order Reopened',
+          message:     `Work order ${workOrderId} has been reopened${reason ? `: ${reason}` : '.'}`,
+          workOrderId,
+        })
+      }
+    }
 
     return updated
   },
