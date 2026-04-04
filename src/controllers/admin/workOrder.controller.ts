@@ -60,6 +60,30 @@ export const assign = async (req: Request, res: Response, next: NextFunction) =>
   } catch (err) { next(err) }
 }
 
+const bulkImportSchema = z.object({
+  workOrders: z.array(z.object({
+    governorateCode: z.string().min(1),
+    siteName: z.string().min(1),
+    description: z.string().optional(),
+    workType: z.string().optional(),
+    priority: z.nativeEnum(WorkOrderPriority).default('MEDIUM'),
+    allocationDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+    targetCompletionDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  })),
+})
+
+export const bulkImport = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { workOrders } = bulkImportSchema.parse(req.body)
+    const results = []
+    for (const wo of workOrders) {
+      const result = await adminWorkOrderService.create(req.user!.userId, wo)
+      results.push(result)
+    }
+    res.status(201).json({ ok: true, imported: results.length })
+  } catch (err) { next(err) }
+}
+
 export const update = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const data   = updateSchema.parse(req.body)
