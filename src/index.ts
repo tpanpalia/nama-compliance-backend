@@ -19,14 +19,16 @@ import { errorHandler } from './middleware/errorHandler'
 const app = express()
 
 // ── Security & parsing ────────────────────────────────────
+// Strict CSP for API routes (JSON-only, no HTML)
 app.use(helmet({
   contentSecurityPolicy: {
     directives: {
-      defaultSrc:  ["'self'"],
-      scriptSrc:   ["'self'", "'unsafe-inline'", "'unsafe-eval'"],
-      styleSrc:    ["'self'", "'unsafe-inline'"],
-      imgSrc:      ["'self'", "data:", "https:"],
-      connectSrc:  ["'self'", "https:"],
+      defaultSrc:  ["'none'"],
+      scriptSrc:   ["'none'"],
+      styleSrc:    ["'none'"],
+      imgSrc:      ["'none'"],
+      connectSrc:  ["'self'"],
+      frameAncestors: ["'none'"],
     },
   },
   crossOriginEmbedderPolicy: false,
@@ -71,7 +73,17 @@ const docsCandidates = [
 const docsPath = docsCandidates.find((p) => fs.existsSync(p))
 if (docsPath) {
   const swaggerDoc = yaml.load(fs.readFileSync(docsPath, 'utf8')) as object
-  app.use('/api/docs', swaggerUi.serve, swaggerUi.setup(swaggerDoc))
+  // Relaxed CSP only for Swagger UI (serves HTML with inline scripts/styles)
+  const swaggerCsp = helmet.contentSecurityPolicy({
+    directives: {
+      defaultSrc:  ["'self'"],
+      scriptSrc:   ["'self'", "'unsafe-inline'"],
+      styleSrc:    ["'self'", "'unsafe-inline'"],
+      imgSrc:      ["'self'", "data:", "https:"],
+      connectSrc:  ["'self'", "https:"],
+    },
+  })
+  app.use('/api/docs', swaggerCsp, swaggerUi.serve, swaggerUi.setup(swaggerDoc))
 }
 
 // ── API routes ────────────────────────────────────────────

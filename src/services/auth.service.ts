@@ -1,3 +1,4 @@
+import crypto from 'crypto'
 import bcrypt from 'bcryptjs'
 import { AppError } from '../middleware/errorHandler'
 import { userRepository } from '../repositories/user.repository'
@@ -50,7 +51,7 @@ export const authService = {
 
     await userRepository.updateLastLogin(user.id)
 
-    const payload      = { userId: user.id, role: user.role, email: user.email }
+    const payload      = { userId: user.id, role: user.role, email: user.email, tokenVersion: user.tokenVersion }
     const accessToken  = signAccessToken(payload)
     const refreshToken = signRefreshToken({ userId: user.id })
 
@@ -68,7 +69,7 @@ export const authService = {
     const user    = await userRepository.findById(decoded.userId)
     if (!user || user.status !== 'ACTIVE') throw new AppError(401, 'Invalid refresh token')
 
-    const accessToken = signAccessToken({ userId: user.id, role: user.role, email: user.email })
+    const accessToken = signAccessToken({ userId: user.id, role: user.role, email: user.email, tokenVersion: user.tokenVersion })
     return { accessToken }
   },
 
@@ -155,7 +156,10 @@ export const authService = {
       throw new AppError(400, 'Current password is incorrect')
     }
     const hash = await bcrypt.hash(newPassword, 12)
-    await userRepository.updatePassword(userId, hash)
+    await prisma.user.update({
+      where: { id: userId },
+      data: { passwordHash: hash, tokenVersion: { increment: 1 } },
+    })
     return { message: 'Password updated' }
   },
 
@@ -171,7 +175,7 @@ export const authService = {
     if (recentCount >= 3) throw new AppError(429, 'Too many OTP requests. Please try again later.')
 
     // Generate 6-digit OTP
-    const otp = String(Math.floor(100000 + Math.random() * 900000))
+    const otp = String(crypto.randomInt(100000, 1000000))
     const expiresAt = new Date(Date.now() + 10 * 60 * 1000) // 10 minutes
 
     // Invalidate previous OTPs for this email
@@ -211,7 +215,12 @@ export const authService = {
     if (!user) throw new AppError(404, 'User not found')
 
     const hash = await bcrypt.hash(newPassword, 12)
-    await userRepository.updatePassword(user.id, hash)
+
+    // Update password and increment tokenVersion to invalidate all existing tokens
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { passwordHash: hash, tokenVersion: { increment: 1 } },
+    })
 
     // Mark OTP as used
     await prisma.passwordResetOtp.update({

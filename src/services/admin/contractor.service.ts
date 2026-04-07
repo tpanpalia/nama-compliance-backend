@@ -1,3 +1,4 @@
+import crypto from 'crypto'
 import bcrypt from 'bcryptjs'
 import { UserStatus } from '@prisma/client'
 import { AppError } from '../../middleware/errorHandler'
@@ -24,7 +25,7 @@ export const adminContractorService = {
     const crExists = await contractorRepository.findByCr(data.crNumber)
     if (crExists) throw new AppError(409, 'CR number already registered')
 
-    const tempPassword = `Temp@${Math.random().toString(36).slice(2, 8).toUpperCase()}`
+    const tempPassword = `Temp@${crypto.randomBytes(6).toString('hex').toUpperCase()}`
     const passwordHash = await bcrypt.hash(tempPassword, 12)
 
     const user = await contractorRepository.createWithUser({

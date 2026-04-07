@@ -1,3 +1,4 @@
+import crypto from 'crypto'
 import bcrypt from 'bcryptjs'
 import { AppError } from '../../middleware/errorHandler'
 import { accessRequestRepository } from '../../repositories/accessRequest.repository'
@@ -36,7 +37,7 @@ export const accessRequestService = {
     const existingUser = await userRepository.findByEmail(request.email)
     if (existingUser) throw new AppError(409, 'A user with this email already exists')
 
-    const tempPassword = `Temp@${Math.random().toString(36).slice(2, 8).toUpperCase()}`
+    const tempPassword = `Temp@${crypto.randomBytes(6).toString('hex').toUpperCase()}`
     const passwordHash = await bcrypt.hash(tempPassword, 12)
 
     let userId: string

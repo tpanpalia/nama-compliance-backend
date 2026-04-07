@@ -5,8 +5,11 @@ const resend = config.resend.apiKey ? new Resend(config.resend.apiKey) : null
 
 export async function sendOtpEmail(to: string, otp: string) {
   if (!resend) {
-    console.log(`[EMAIL MOCK] OTP for ${to}: ${otp}`)
-    return
+    if (process.env.NODE_ENV === 'development') {
+      console.log(`[EMAIL MOCK] OTP for ${to}: ${otp}`)
+      return
+    }
+    throw new Error('Email service is not configured. Set RESEND_API_KEY environment variable.')
   }
   await resend.emails.send({
     from: config.resend.fromEmail,

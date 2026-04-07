@@ -5,6 +5,7 @@ export interface JwtPayload {
   userId: string
   role: string
   email: string
+  tokenVersion: number
 }
 
 export interface RefreshPayload {
