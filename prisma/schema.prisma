@@ -186,9 +186,11 @@ model User {
   passwordHash      String             @map("password_hash")
   role              UserRole
   status            UserStatus         @default(PENDING)
-  lastLogin         DateTime?          @map("last_login") @db.Timestamptz
-  createdAt         DateTime           @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt         DateTime           @updatedAt @map("updated_at") @db.Timestamptz
+  lastLogin            DateTime?       @map("last_login") @db.Timestamptz
+  failedLoginAttempts  Int             @default(0) @map("failed_login_attempts")
+  lockedUntil          DateTime?       @map("locked_until") @db.Timestamptz
+  createdAt            DateTime        @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt            DateTime        @updatedAt @map("updated_at") @db.Timestamptz
 
   contractorProfile ContractorProfile?
   staffProfile      StaffProfile?

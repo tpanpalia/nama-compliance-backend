@@ -9,12 +9,43 @@ import { sendOtpEmail } from '../lib/email'
 
 export const authService = {
   login: async (email: string, password: string) => {
+    const MAX_ATTEMPTS = 5
+    const LOCKOUT_MINUTES = 15
+
     const user = await userRepository.findByEmail(email.toLowerCase())
-    if (!user || !(await bcrypt.compare(password, user.passwordHash))) {
-      throw new AppError(401, 'Invalid email or password')
+    if (!user) throw new AppError(401, 'Invalid email or password')
+
+    // Check if account is locked
+    if (user.lockedUntil && user.lockedUntil > new Date()) {
+      const minutesLeft = Math.ceil((user.lockedUntil.getTime() - Date.now()) / 60000)
+      throw new AppError(423, `Account locked due to too many failed attempts. Try again in ${minutesLeft} minute(s).`)
     }
+
+    // Check password
+    const passwordValid = await bcrypt.compare(password, user.passwordHash)
+    if (!passwordValid) {
+      const attempts = (user.failedLoginAttempts || 0) + 1
+      const lockout = attempts >= MAX_ATTEMPTS ? new Date(Date.now() + LOCKOUT_MINUTES * 60 * 1000) : null
+      await prisma.user.update({
+        where: { id: user.id },
+        data: { failedLoginAttempts: attempts, lockedUntil: lockout },
+      })
+      if (lockout) {
+        throw new AppError(423, `Account locked after ${MAX_ATTEMPTS} failed attempts. Try again in ${LOCKOUT_MINUTES} minutes.`)
+      }
+      throw new AppError(401, `Invalid email or password. ${MAX_ATTEMPTS - attempts} attempt(s) remaining.`)
+    }
+
     if (user.status !== 'ACTIVE') {
       throw new AppError(403, `Account is ${user.status.toLowerCase()}. Contact administrator.`)
+    }
+
+    // Reset failed attempts on successful login
+    if (user.failedLoginAttempts > 0 || user.lockedUntil) {
+      await prisma.user.update({
+        where: { id: user.id },
+        data: { failedLoginAttempts: 0, lockedUntil: null },
+      })
     }
 
     await userRepository.updateLastLogin(user.id)
