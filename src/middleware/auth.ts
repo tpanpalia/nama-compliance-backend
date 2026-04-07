@@ -1,6 +1,5 @@
 import { Request, Response, NextFunction } from 'express'
 import { verifyAccessToken, JwtPayload } from '../lib/jwt'
-import { prisma } from '../lib/prisma'
 
 // Extend Express Request with authenticated user
 declare global {
@@ -21,21 +20,19 @@ export function authenticate(req: Request, res: Response, next: NextFunction): v
   const token = header.slice(7)
   try {
     const payload = verifyAccessToken(token)
-
-    // Validate tokenVersion against the database to support revocation
-    prisma.user.findUnique({ where: { id: payload.userId }, select: { tokenVersion: true } })
-      .then((user) => {
-        if (!user || user.tokenVersion !== payload.tokenVersion) {
-          res.status(401).json({ error: 'Token has been revoked' })
-          return
-        }
-        req.user = payload
-        next()
-      })
-      .catch(() => {
-        res.status(401).json({ error: 'Invalid or expired token' })
-      })
+    req.user = payload
+    next()
   } catch {
     res.status(401).json({ error: 'Invalid or expired token' })
+  }
+}
+
+export function requireRole(...roles: string[]) {
+  return (req: Request, res: Response, next: NextFunction): void => {
+    if (!req.user || !roles.includes(req.user.role)) {
+      res.status(403).json({ error: 'Insufficient permissions' })
+      return
+    }
+    next()
   }
 }

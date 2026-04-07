@@ -47,6 +47,7 @@
     "@types/jsonwebtoken": "^9.0.9",
     "@types/node": "^22.14.0",
     "@types/swagger-ui-express": "^4.1.8",
+    "pg": "^8.20.0",
     "prisma": "^5.22.0",
     "tsx": "^4.19.3",
     "typescript": "^5.7.3"
