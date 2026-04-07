@@ -7,6 +7,7 @@ import './config'
 import express from 'express'
 import cors from 'cors'
 import helmet from 'helmet'
+import rateLimit from 'express-rate-limit'
 import swaggerUi from 'swagger-ui-express'
 import yaml from 'js-yaml'
 import fs from 'fs'
@@ -36,6 +37,24 @@ app.use(cors({
 }))
 app.use(express.json({ limit: '10mb' }))
 app.use(express.urlencoded({ extended: true }))
+
+// ── Rate limiting ────────────────────────────────────────
+// General API: 100 requests per minute per IP
+app.use('/api', rateLimit({
+  windowMs: 60 * 1000,
+  max: 100,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many requests, please try again later.' },
+}))
+// Auth endpoints: stricter — 15 requests per minute per IP
+app.use('/api/auth', rateLimit({
+  windowMs: 60 * 1000,
+  max: 15,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many authentication attempts, please try again later.' },
+}))
 
 // ── Health check ──────────────────────────────────────────
 app.get('/health', (_req, res) => {
