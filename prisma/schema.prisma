@@ -475,7 +475,7 @@ model Evidence {
   gpsAccuracy     Decimal?             @map("gps_accuracy") @db.Decimal(8, 2)
   gpsAddress      String?              @map("gps_address")
   comment         String?
-  capturedAt      DateTime?            @map("captured_at") @db.Timestamptz
+  capturedAt      DateTime             @default(now()) @map("captured_at") @db.Timestamptz
   createdAt       DateTime             @default(now()) @map("created_at") @db.Timestamptz
   updatedAt       DateTime             @updatedAt @map("updated_at") @db.Timestamptz
 
