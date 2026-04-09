@@ -234,7 +234,7 @@ components:
       properties:
         id:                { type: string, format: uuid }
         workOrderId:       { type: string }
-        checklistVersionId:{ type: integer }
+        checklistVersionId: { type: integer }
         hseScore:          { type: number, format: float, nullable: true }
         technicalScore:    { type: number, format: float, nullable: true }
         processScore:      { type: number, format: float, nullable: true }
@@ -726,7 +726,7 @@ paths:
                   fileId:          { type: string, format: uuid }
                   uploadUrl:       { type: string, description: PUT this URL directly with the file bytes }
                   publicUrl:       { type: string }
-                  expiresInSeconds:{ type: integer, example: 900 }
+                  expiresInSeconds: { type: integer, example: 900 }
         '401': { $ref: '#/components/responses/Unauthorized' }
 
   /files/{id}/confirm:
@@ -765,7 +765,7 @@ paths:
                 type: object
                 properties:
                   url:             { type: string }
-                  expiresInSeconds:{ type: integer, example: 3600 }
+                  expiresInSeconds: { type: integer, example: 3600 }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/NotFound' }
 
@@ -1262,7 +1262,7 @@ paths:
                 properties:
                   ok:          { type: boolean }
                   userId:      { type: string, format: uuid }
-                  tempPassword:{ type: string }
+                  tempPassword: { type: string }
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
@@ -1473,7 +1473,7 @@ paths:
                             id:            { type: string, format: uuid }
                             reportType:    { type: string }
                             format:        { type: string, enum: [PDF, EXCEL, CSV] }
-                            parametersUsed:{ type: object }
+                            parametersUsed: { type: object }
                             generatedAt:   { type: string, format: date-time }
                             file:          { type: object, nullable: true, properties: { s3Key: { type: string } } }
         '401': { $ref: '#/components/responses/Unauthorized' }
