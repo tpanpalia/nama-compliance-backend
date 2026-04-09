@@ -45,6 +45,11 @@ export class S3Adapter implements StorageService {
     return getSignedUrl(this.client, command, { expiresIn: expiresInSeconds })
   }
 
+  async presignReadThumb(s3Key: string, expiresInSeconds = 3600): Promise<string> {
+    // S3 doesn't have built-in transforms — return full-size URL
+    return this.presignRead(s3Key, expiresInSeconds)
+  }
+
   async upload(s3Key: string, buffer: Buffer, mimeType: string): Promise<void> {
     const command = new PutObjectCommand({
       Bucket: this.bucket,

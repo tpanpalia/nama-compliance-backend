@@ -65,7 +65,16 @@ export const fileService = {
       }
     }
 
-    const url = await getStorageService().presignRead(file.s3Key, 3600)
-    return { url, expiresInSeconds: 3600 }
+    try {
+      const storage = getStorageService()
+      const isImage = file.mimeType?.startsWith('image/')
+      const [url, thumbnailUrl] = await Promise.all([
+        storage.presignRead(file.s3Key, 3600),
+        isImage ? storage.presignReadThumb(file.s3Key, 3600).catch(() => null) : Promise.resolve(null),
+      ])
+      return { url, thumbnailUrl, expiresInSeconds: 3600 }
+    } catch {
+      return { url: '', thumbnailUrl: null, expiresInSeconds: 0 }
+    }
   },
 }
