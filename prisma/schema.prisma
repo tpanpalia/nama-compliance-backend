@@ -379,6 +379,7 @@ model WorkOrder {
   allocationDate       DateTime          @map("allocation_date") @db.Date
   targetCompletionDate DateTime          @map("target_completion_date") @db.Date
   submissionDate       DateTime?         @map("submission_date") @db.Timestamptz
+  inspectionDeadline   DateTime?         @map("inspection_deadline") @db.Date
   createdAt            DateTime          @default(now()) @map("created_at") @db.Timestamptz
   updatedAt            DateTime          @updatedAt @map("updated_at") @db.Timestamptz
 
@@ -398,6 +399,7 @@ model WorkOrder {
   @@index([allocationDate])
   @@index([targetCompletionDate])
   @@index([status, contractorCr])
+  @@index([inspectionDeadline])
   @@map("work_orders")
 }
 

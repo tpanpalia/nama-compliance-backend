@@ -161,25 +161,19 @@ async function main() {
   }
   console.log(`   ✓ ${USERS.regulators.length} regulators\n`)
 
-  // ─── Create Dummy Files (for evidence photos) ────────────────────────────
+  // ─── Load Sample Files (uploaded by upload-sample-images.ts) ──────────────
 
-  console.log('📁 Creating dummy evidence files...')
-  const FILE_COUNT = 300
-  const fileIds: string[] = []
-  for (let i = 0; i < FILE_COUNT; i++) {
-    const file = await prisma.file.create({
-      data: {
-        bucket: 'evidence-photo',
-        s3Key: `seed/evidence-${i.toString().padStart(4, '0')}.jpg`,
-        mimeType: 'image/jpeg',
-        category: 'EVIDENCE_PHOTO',
-        uploadStatus: 'UPLOADED',
-        uploadedBy: pick(contractorProfiles).userId,
-      },
-    })
-    fileIds.push(file.id)
+  console.log('📁 Loading sample evidence files...')
+  const sampleFiles = await prisma.file.findMany({
+    where: { s3Key: { startsWith: 'sample/' }, uploadStatus: 'UPLOADED' },
+    select: { id: true },
+  })
+  if (sampleFiles.length === 0) {
+    console.error('❌ No sample files found. Run: npx ts-node scripts/upload-sample-images.ts first.')
+    process.exit(1)
   }
-  console.log(`   ✓ ${FILE_COUNT} files\n`)
+  const fileIds = sampleFiles.map(f => f.id)
+  console.log(`   ✓ Found ${fileIds.length} sample files (reusing across all work orders)\n`)
 
   // ─── Load Prerequisites ───────────────────────────────────────────────────
 
@@ -216,10 +210,26 @@ async function main() {
       const needsContractor = status !== 'UNASSIGNED'
       const needsInspector = ['PENDING_INSPECTION', 'INSPECTION_IN_PROGRESS', 'INSPECTION_COMPLETED'].includes(status)
       const needsInspection = ['PENDING_INSPECTION', 'INSPECTION_IN_PROGRESS', 'INSPECTION_COMPLETED'].includes(status)
-      const needsContractorEvidence = ['SUBMITTED', 'PENDING_INSPECTION', 'INSPECTION_IN_PROGRESS', 'INSPECTION_COMPLETED'].includes(status)
+      const needsContractorEvidence = ['SUBMITTED', 'PENDING_INSPECTION', 'INSPECTION_IN_PROGRESS', 'INSPECTION_COMPLETED', 'OVERDUE'].includes(status)
       const needsInspectorEvidence = status === 'INSPECTION_COMPLETED'
       const needsResponses = ['INSPECTION_IN_PROGRESS', 'INSPECTION_COMPLETED'].includes(status)
       const submissionDate = needsContractorEvidence ? randomDate(allocationDate, targetDate) : null
+
+      // Calculate inspection deadline from submission date (same rules as backend)
+      let inspectionDeadline: Date | null = null
+      if (submissionDate) {
+        const day = submissionDate.getDate()
+        if (day <= 25) {
+          inspectionDeadline = new Date(submissionDate.getFullYear(), submissionDate.getMonth() + 1, 0)
+        } else {
+          const lastDay = new Date(submissionDate.getFullYear(), submissionDate.getMonth() + 1, 0)
+          inspectionDeadline = new Date(lastDay.getTime() + 7 * 24 * 60 * 60 * 1000)
+        }
+        // For OVERDUE WOs: force deadline to be in the past
+        if (status === 'OVERDUE') {
+          inspectionDeadline = new Date(submissionDate.getTime() + 5 * 24 * 60 * 60 * 1000) // 5 days after submission (guaranteed past)
+        }
+      }
 
       await prisma.workOrder.create({
         data: {
@@ -236,6 +246,7 @@ async function main() {
           contractorCr: needsContractor ? contractor.crNumber : null,
           assignedInspectorId: needsInspector ? inspector.id : null,
           submissionDate,
+          inspectionDeadline,
         },
       })
 

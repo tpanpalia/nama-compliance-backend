@@ -16,10 +16,12 @@ export const inspectorWorkOrderService = {
     } else if (params.view === 'mine') {
       where = {
         assignedInspectorId: userId,
-        status: { in: ['ASSIGNED', 'PENDING_INSPECTION', 'INSPECTION_IN_PROGRESS'] as WorkOrderStatus[] },
+        status: { in: ['ASSIGNED', 'PENDING_INSPECTION', 'INSPECTION_IN_PROGRESS', 'OVERDUE'] as WorkOrderStatus[] },
       }
     } else if (params.view === 'completed') {
       where = { assignedInspectorId: userId, status: 'INSPECTION_COMPLETED' as WorkOrderStatus }
+    } else if (params.view === 'all') {
+      where = { assignedInspectorId: userId }
     }
 
     const [items, total] = await Promise.all([
