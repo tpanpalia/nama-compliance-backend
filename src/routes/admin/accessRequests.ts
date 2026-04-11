@@ -7,7 +7,8 @@ router.get('/',               accessRequestController.list)
 router.get('/:id',            accessRequestController.getById)
 router.post('/:id/approve',   accessRequestController.approve)
 router.post('/:id/reject',    accessRequestController.reject)
-router.post('/:id/deactivate', accessRequestController.deactivate)
-router.patch('/:id/verify',   accessRequestController.verifyDocument)
+router.post('/:id/deactivate',  accessRequestController.deactivate)
+router.post('/:id/reactivate', accessRequestController.reactivate)
+router.patch('/:id/verify',    accessRequestController.verifyDocument)
 
 export default router

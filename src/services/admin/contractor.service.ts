@@ -139,6 +139,16 @@ export const adminContractorService = {
 
     await contractorRepository.updateUserStatus(contractor.userId, status as UserStatus)
 
+    // Sync the AccessRequest status to stay consistent
+    const user = await userRepository.findById(contractor.userId)
+    if (user) {
+      if (status === 'SUSPENDED') {
+        await accessRequestRepository.updateStatusByEmail(user.email, 'APPROVED', 'DEACTIVATED', performedBy)
+      } else if (status === 'ACTIVE') {
+        await accessRequestRepository.updateStatusByEmail(user.email, 'DEACTIVATED', 'APPROVED', performedBy)
+      }
+    }
+
     const action = status === 'SUSPENDED' ? 'SUSPENDED' : 'ACTIVATED'
     await auditLogRepository.create({
       performedBy,

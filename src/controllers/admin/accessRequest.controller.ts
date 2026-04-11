@@ -47,6 +47,13 @@ export const deactivate = async (req: Request, res: Response, next: NextFunction
   } catch (err) { next(err) }
 }
 
+export const reactivate = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const result = await accessRequestService.reactivate(req.user!.userId, req.params.id)
+    res.json(result)
+  } catch (err) { next(err) }
+}
+
 export const verifyDocument = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { verificationStatus } = verifyDocSchema.parse(req.body)
