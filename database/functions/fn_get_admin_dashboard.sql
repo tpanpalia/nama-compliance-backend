@@ -122,7 +122,9 @@ BEGIN
 
       'pending_reviews', jsonb_build_object(
         'value', (
-          SELECT COUNT(*) FROM work_orders WHERE status = 'SUBMITTED'
+          SELECT COUNT(*) FROM work_orders
+          WHERE status IN ('SUBMITTED', 'PENDING_INSPECTION', 'INSPECTION_IN_PROGRESS', 'OVERDUE')
+            AND allocation_date BETWEEN v_from_date AND v_to_date
         )
       )
     ),
