@@ -2,7 +2,7 @@
 -- get_contractors_summary()
 --
 -- Returns a lightweight summary for ALL active contractors:
---   cr_number, avg_score, active, completed, total_work_orders
+--   cr_number, avg_score, assigned, in_progress, completed, total_work_orders
 --
 -- Used by: Regulator Contractors list page (card grid)
 -- Instead of N individual get_contractor_performance() calls
@@ -23,6 +23,8 @@ BEGIN
         'cr_number',        cp.cr_number,
         'total_work_orders', COALESCE(wo_stats.total, 0),
         'completed',         COALESCE(wo_stats.completed, 0),
+        'assigned',          COALESCE(wo_stats.assigned, 0),
+        'in_progress',       COALESCE(wo_stats.in_progress, 0),
         'active',            COALESCE(wo_stats.active, 0),
         'avg_score',         wo_stats.avg_score
       ) AS row_data
@@ -32,11 +34,17 @@ BEGIN
         SELECT
           COUNT(DISTINCT wo.work_order_id) AS total,
           COUNT(DISTINCT wo.work_order_id)
-            FILTER (WHERE wo.status = 'INSPECTION_COMPLETED') AS completed,
+            FILTER (WHERE wo.status = 'ASSIGNED') AS assigned,
+          COUNT(DISTINCT wo.work_order_id)
+            FILTER (WHERE wo.status = 'IN_PROGRESS') AS in_progress,
+          COUNT(DISTINCT wo.work_order_id)
+            FILTER (WHERE wo.status IN (
+              'SUBMITTED','PENDING_INSPECTION','INSPECTION_IN_PROGRESS','OVERDUE'
+            )) AS completed,
           COUNT(DISTINCT wo.work_order_id)
             FILTER (WHERE wo.status IN (
               'ASSIGNED','IN_PROGRESS','SUBMITTED',
-              'PENDING_INSPECTION','INSPECTION_IN_PROGRESS'
+              'PENDING_INSPECTION','INSPECTION_IN_PROGRESS','OVERDUE'
             )) AS active,
           ROUND(AVG(i.final_score)::numeric, 1) AS avg_score
         FROM work_orders wo

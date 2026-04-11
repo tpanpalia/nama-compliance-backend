@@ -1,8 +1,8 @@
 /**
- * Uploads sample placeholder images to Supabase storage.
- * Creates file records in the DB that seed-data.ts can reuse.
+ * Creates file records in the DB pointing to real photos already in Supabase storage.
+ * Uses existing evidence_photo/ files directly — no copying or placeholders.
  *
- * Run ONCE before seed-data.ts:
+ * Run ONCE before seed-data.ts or repopulate-evidence.ts:
  *   npx ts-node scripts/upload-sample-images.ts
  */
 import * as dotenv from 'dotenv'
@@ -25,67 +25,69 @@ const BUCKET = process.env.SUPABASE_STORAGE_BUCKET || 'nws-compliance'
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY)
 
-// Generate a simple colored JPEG-like image buffer (valid minimal JPEG)
-function createPlaceholderImage(label: string): Buffer {
-  // Minimal valid JPEG (1x1 pixel, ~631 bytes) — browsers will render it
-  const base64 = '/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/2wBDAQkJCQwLDBgNDRgyIRwhMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjL/wAARCAABAAEDASIAAhEBAxEB/8QAHwAAAQUBAQEBAQEAAAAAAAAAAAECAwQFBgcICQoL/8QAtRAAAgEDAwIEAwUFBAQAAAF9AQIDAAQRBRIhMUEGE1FhByJxFDKBkaEII0KxwRVS0fAkM2JyggkKFhcYGRolJicoKSo0NTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNkZWZnaGlqc3R1dnd4eXqDhIWGh4iJipKTlJWWl5iZmqKjpKWmp6ipqrKztLW2t7i5usLDxMXGx8jJytLT1NXW19jZ2uHi4+Tl5ufo6erx8vP09fb3+Pn6/8QAHwEAAwEBAQEBAQEBAQAAAAAAAAECAwQFBgcICQoL/8QAtREAAgECBAQDBAcFBAQAAQJ3AAECAxEEBSExBhJBUQdhcRMiMoEIFEKRobHBCSMzUvAVYnLRChYkNOEl8RcYI4Q/SFhSRFJiXEVGV0ZXWFlaY2RlZmdoaWpzdHV2d3h5eoKDhIWGh4iJipKTlJWWl5iZmqKjpKWmp6ipqrKztLW2t7i5usLDxMXGx8jJytLT1NXW19jZ2uHi4+Tl5ufo6erx8vP09fb3+Pn6/9oADAMBAAIRAxEAPwD3+gD/2Q=='
-  return Buffer.from(base64, 'base64')
-}
-
-const SAMPLE_COUNT = 10
-const SAMPLE_LABELS = [
-  'PPE Compliance', 'Equipment Check', 'HSE Standards',
-  'Excavation Works', 'Warning Tape', 'Sand Bedding',
-  'Pipeline Flushing', 'Marker Posts', 'Site Notification',
-  'Site Closure',
-]
-
 async function main() {
-  console.log('📸 Uploading sample images to Supabase...\n')
+  console.log('📸 Setting up evidence file records from real Supabase photos...\n')
 
   const adminUser = await prisma.user.findFirst({ where: { role: 'ADMIN' }, select: { id: true } })
   if (!adminUser) { console.error('No admin user found. Run seed.ts first.'); process.exit(1) }
 
-  // Check if sample files already exist
-  const existing = await prisma.file.count({ where: { s3Key: { startsWith: 'sample/' } } })
-  if (existing >= SAMPLE_COUNT) {
-    console.log(`   ✓ ${existing} sample images already exist, skipping upload\n`)
-    return
+  // Check if we already have enough seed file records
+  const existing = await prisma.file.count({ where: { s3Key: { startsWith: 'evidence_photo/' }, uploadStatus: 'UPLOADED', category: 'EVIDENCE_PHOTO' } })
+
+  // List real photos from evidence_photo/ in Supabase storage
+  console.log('📂 Listing photos from evidence_photo/ in Supabase storage...')
+  const allStorageFiles: { name: string; metadata: any }[] = []
+  let offset = 0
+  while (true) {
+    const { data, error } = await supabase.storage
+      .from(BUCKET)
+      .list('evidence_photo', { limit: 100, offset, sortBy: { column: 'created_at', order: 'desc' } })
+    if (error || !data || data.length === 0) break
+    allStorageFiles.push(...(data as any[]))
+    offset += data.length
+    if (data.length < 100) break
   }
 
-  for (let i = 0; i < SAMPLE_COUNT; i++) {
-    const label = SAMPLE_LABELS[i]
-    const s3Key = `sample/evidence-${i.toString().padStart(3, '0')}.jpg`
-    const imageBuffer = createPlaceholderImage(label)
+  // Filter to image files only
+  const imageFiles = allStorageFiles.filter(f =>
+    f.name.endsWith('.jpg') || f.name.endsWith('.jpeg') || f.name.endsWith('.png')
+  )
 
-    // Upload to Supabase storage
-    const { error } = await supabase.storage
-      .from(BUCKET)
-      .upload(s3Key, imageBuffer, { contentType: 'image/jpeg', upsert: true })
+  console.log(`   Found ${imageFiles.length} real photos in storage`)
+  console.log(`   ${existing} file records already exist in DB`)
 
-    if (error) {
-      console.error(`   ✗ Failed to upload ${s3Key}: ${error.message}`)
-      continue
-    }
+  // Find which files already have DB records
+  const existingKeys = new Set(
+    (await prisma.file.findMany({
+      where: { s3Key: { startsWith: 'evidence_photo/' } },
+      select: { s3Key: true },
+    })).map(f => f.s3Key)
+  )
 
-    // Create file record in DB
+  let created = 0
+  for (const file of imageFiles) {
+    const s3Key = `evidence_photo/${file.name}`
+    if (existingKeys.has(s3Key)) continue
+
+    const mimeType = file.name.endsWith('.png') ? 'image/png' : 'image/jpeg'
+    const fileSize = file.metadata?.size ? BigInt(file.metadata.size) : undefined
+
     await prisma.file.create({
       data: {
         bucket: BUCKET,
         s3Key,
-        mimeType: 'image/jpeg',
+        mimeType,
         category: 'EVIDENCE_PHOTO',
         uploadStatus: 'UPLOADED',
-        fileSize: BigInt(imageBuffer.length),
+        fileSize,
         uploadedBy: adminUser.id,
       },
     })
-
-    console.log(`   ✓ Uploaded ${label} → ${s3Key}`)
+    created++
   }
 
-  const totalFiles = await prisma.file.count({ where: { s3Key: { startsWith: 'sample/' } } })
-  console.log(`\n✅ ${totalFiles} sample images ready in Supabase storage`)
+  const totalFiles = await prisma.file.count({ where: { s3Key: { startsWith: 'evidence_photo/' }, uploadStatus: 'UPLOADED' } })
+  console.log(`\n✅ Created ${created} new file records (${totalFiles} total evidence_photo files in DB)`)
 }
 
 main()

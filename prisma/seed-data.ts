@@ -161,19 +161,19 @@ async function main() {
   }
   console.log(`   ✓ ${USERS.regulators.length} regulators\n`)
 
-  // ─── Load Sample Files (uploaded by upload-sample-images.ts) ──────────────
+  // ─── Load Evidence Files (created by upload-sample-images.ts) ──────────────
 
-  console.log('📁 Loading sample evidence files...')
-  const sampleFiles = await prisma.file.findMany({
-    where: { s3Key: { startsWith: 'sample/' }, uploadStatus: 'UPLOADED' },
+  console.log('📁 Loading evidence photo files...')
+  const evidenceFiles = await prisma.file.findMany({
+    where: { s3Key: { startsWith: 'evidence_photo/' }, uploadStatus: 'UPLOADED' },
     select: { id: true },
   })
-  if (sampleFiles.length === 0) {
-    console.error('❌ No sample files found. Run: npx ts-node scripts/upload-sample-images.ts first.')
+  if (evidenceFiles.length === 0) {
+    console.error('❌ No evidence_photo files found. Run: npx ts-node scripts/upload-sample-images.ts first.')
     process.exit(1)
   }
-  const fileIds = sampleFiles.map(f => f.id)
-  console.log(`   ✓ Found ${fileIds.length} sample files (reusing across all work orders)\n`)
+  const fileIds = evidenceFiles.map(f => f.id)
+  console.log(`   ✓ Found ${fileIds.length} real evidence files (reusing across all work orders)\n`)
 
   // ─── Load Prerequisites ───────────────────────────────────────────────────
 

@@ -12,7 +12,7 @@ export const inspectorWorkOrderService = {
 
     let where: object = {}
     if (params.view === 'pool') {
-      where = { status: 'SUBMITTED' as WorkOrderStatus, assignedInspectorId: null }
+      where = { status: { in: ['SUBMITTED', 'OVERDUE'] as WorkOrderStatus[] }, assignedInspectorId: null }
     } else if (params.view === 'mine') {
       where = {
         assignedInspectorId: userId,
@@ -42,8 +42,8 @@ export const inspectorWorkOrderService = {
     const wo = await workOrderRepository.findById(workOrderId)
     if (!wo) throw new AppError(404, 'Work order not found')
 
-    if (wo.status !== 'SUBMITTED') {
-      throw new AppError(400, 'Only SUBMITTED work orders can be claimed from the work pool')
+    if (wo.status !== 'SUBMITTED' && wo.status !== 'OVERDUE') {
+      throw new AppError(400, 'Only SUBMITTED or OVERDUE work orders can be claimed from the work pool')
     }
     if (wo.assignedInspectorId) {
       throw new AppError(409, 'Work order has already been claimed by another inspector')
