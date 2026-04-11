@@ -1,6 +1,7 @@
 import { prisma } from '../../lib/prisma'
 import path from 'path'
-import PDFDocument from 'pdfkit'
+import fs from 'fs'
+import puppeteer from 'puppeteer'
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -24,441 +25,227 @@ interface WorkOrderWithRelations {
   assignedInspector: { staffProfile: { fullName: string } | null } | null
   governorate: { code: string; nameEn: string }
   inspection: {
-    hseScore: unknown
-    technicalScore: unknown
-    processScore: unknown
-    closureScore: unknown
-    finalScore: unknown
-    status: string
-    submittedAt: Date | null
+    hseScore: unknown; technicalScore: unknown; processScore: unknown; closureScore: unknown; finalScore: unknown
+    status: string; submittedAt: Date | null
     responses: { checklistItemId: string; rating: string | null }[]
   } | null
-  scoringWeights: {
-    hsePercent: number
-    technicalPercent: number
-    processPercent: number
-    closurePercent: number
-  }
+  scoringWeights: { hsePercent: number; technicalPercent: number; processPercent: number; closurePercent: number }
 }
 
-// ─── Colors ─────────────────────────────────────────────────────────────────
-
-const COLORS = {
-  primary: '#02474E',
-  green: '#27AE60',
-  orange: '#E67E22',
-  red: '#C0392B',
-  teal: '#02474E',
-  darkText: '#333333',
-  mediumText: '#666666',
-  lightText: '#999999',
-  border: '#DDDDDD',
-  lightBg: '#F8F9FA',
-  headerBg: '#02474E',
-  headerText: '#FFFFFF',
-  greenBg: '#E8F5E9',
-  orangeBg: '#FFF3E0',
-  redBg: '#FFEBEE',
-}
-
-function scoreColor(score: number): string {
-  if (score >= 90) return COLORS.green
-  if (score >= 75) return COLORS.orange
-  return COLORS.red
-}
-
-function scoreBg(score: number): string {
-  if (score >= 90) return COLORS.greenBg
-  if (score >= 75) return COLORS.orangeBg
-  return COLORS.redBg
-}
-
-function durationColor(days: number): string {
-  if (days <= 7) return COLORS.green
-  if (days <= 10) return COLORS.orange
-  return COLORS.red
-}
-
-// ─── Score computation ──────────────────────────────────────────────────────
+// ─── Helpers ────────────────────────────────────────────────────────────────
 
 function ratingToScore(rating: string | null): number | null {
   if (!rating) return null
-  if (rating === 'COMPLIANT') return 100
-  if (rating === 'PARTIAL') return 50
-  return 0 // NON_COMPLIANT
+  return rating === 'COMPLIANT' ? 100 : rating === 'PARTIAL' ? 50 : 0
 }
 
-function computeCategoryScores(responses: { checklistItemId: string; rating: string | null }[]): {
-  hse: number | null; technical: number | null; process: number | null; closure: number | null
-} {
-  const categories: Record<string, number[]> = { HSE: [], TECH: [], PROC: [], CLOSE: [] }
-
+function computeCategoryScores(responses: { checklistItemId: string; rating: string | null }[]) {
+  const cats: Record<string, number[]> = { HSE: [], TECH: [], PROC: [], CLOSE: [] }
   for (const r of responses) {
-    const score = ratingToScore(r.rating)
-    if (score === null) continue
-    const prefix = r.checklistItemId.split('-')[0]
-    if (prefix === 'HSE') categories.HSE.push(score)
-    else if (prefix === 'TECH') categories.TECH.push(score)
-    else if (prefix === 'PROC') categories.PROC.push(score)
-    else if (prefix === 'CLOSE') categories.CLOSE.push(score)
+    const s = ratingToScore(r.rating); if (s === null) continue
+    const p = r.checklistItemId.split('-')[0]; if (cats[p]) cats[p].push(s)
   }
-
-  const avg = (arr: number[]) => arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : null
-
-  return {
-    hse: avg(categories.HSE),
-    technical: avg(categories.TECH),
-    process: avg(categories.PROC),
-    closure: avg(categories.CLOSE),
-  }
+  const avg = (a: number[]) => a.length ? a.reduce((x, y) => x + y, 0) / a.length : null
+  return { hse: avg(cats.HSE), technical: avg(cats.TECH), process: avg(cats.PROC), closure: avg(cats.CLOSE) }
 }
 
-function computeOverallScore(
-  cats: { hse: number | null; technical: number | null; process: number | null; closure: number | null },
-  weights: { hsePercent: number; technicalPercent: number; processPercent: number; closurePercent: number }
-): number | null {
-  const parts: { score: number; weight: number }[] = []
-  if (cats.hse !== null) parts.push({ score: cats.hse, weight: weights.hsePercent })
-  if (cats.technical !== null) parts.push({ score: cats.technical, weight: weights.technicalPercent })
-  if (cats.process !== null) parts.push({ score: cats.process, weight: weights.processPercent })
-  if (cats.closure !== null) parts.push({ score: cats.closure, weight: weights.closurePercent })
-
-  if (parts.length === 0) return null
-  const totalWeight = parts.reduce((s, p) => s + p.weight, 0)
-  if (totalWeight === 0) return null
-  return parts.reduce((s, p) => s + (p.score * p.weight), 0) / totalWeight
+function computeOverallScore(cats: ReturnType<typeof computeCategoryScores>, w: WorkOrderWithRelations['scoringWeights']): number | null {
+  const parts: { s: number; w: number }[] = []
+  if (cats.hse !== null) parts.push({ s: cats.hse, w: w.hsePercent })
+  if (cats.technical !== null) parts.push({ s: cats.technical, w: w.technicalPercent })
+  if (cats.process !== null) parts.push({ s: cats.process, w: w.processPercent })
+  if (cats.closure !== null) parts.push({ s: cats.closure, w: w.closurePercent })
+  if (!parts.length) return null
+  const tw = parts.reduce((a, p) => a + p.w, 0); if (!tw) return null
+  return parts.reduce((a, p) => a + (p.s * p.w), 0) / tw
 }
 
-// ─── PDF Drawing Helpers ────────────────────────────────────────────────────
-
-const LOGO_PATH = path.resolve(__dirname, '../../assets/nama-logo.png')
-
-function drawHeader(doc: PDFKit.PDFDocument, reportType: string): void {
-  // Logo
-  try {
-    doc.image(LOGO_PATH, 40, 25, { height: 50 })
-  } catch {
-    // Logo not found, skip
-  }
-
-  // Company name
-  doc.font('Helvetica-Bold').fontSize(14).fillColor(COLORS.darkText)
-    .text('NAMA WATER SERVICES', 110, 30, { lineBreak: false })
-
-  // Report type subtitle
-  doc.font('Helvetica').fontSize(9).fillColor(COLORS.mediumText)
-    .text(reportType, 110, 48, { lineBreak: false })
-
-  // Right side - date & confidential
-  const rightX = doc.page.width - 40 - 180
-  const today = new Date().toLocaleDateString('en-US', { month: 'long', day: '2-digit', year: 'numeric' })
-  doc.font('Helvetica').fontSize(8).fillColor(COLORS.mediumText)
-    .text(`Generated: ${today}`, rightX, 30, { align: 'right', width: 180, lineBreak: false })
-  doc.font('Helvetica').fontSize(8).fillColor(COLORS.mediumText)
-    .text('CONFIDENTIAL', rightX, 42, { align: 'right', width: 180, lineBreak: false })
-
-  // Red badge "INTERNAL USE ONLY"
-  const badgeX = doc.page.width - 40 - 100
-  doc.roundedRect(badgeX, 55, 100, 20, 3).fill(COLORS.red)
-  doc.font('Helvetica-Bold').fontSize(7).fillColor('#FFFFFF')
-    .text('INTERNAL USE ONLY', badgeX, 60, { width: 100, align: 'center', lineBreak: false })
-
-  // Color bar: red, orange, green, teal
-  const barY = 82
-  const barH = 4
-  const segW = (doc.page.width - 80) / 4
-  doc.rect(40, barY, segW, barH).fill(COLORS.red)
-  doc.rect(40 + segW, barY, segW, barH).fill(COLORS.orange)
-  doc.rect(40 + 2 * segW, barY, segW, barH).fill(COLORS.green)
-  doc.rect(40 + 3 * segW, barY, segW, barH).fill(COLORS.teal)
-}
-
-function drawFooter(doc: PDFKit.PDFDocument, reportId: string, pageNum: number): void {
-  const y = doc.page.height - 40
-  doc.font('Helvetica').fontSize(7).fillColor(COLORS.lightText)
-    .text('NAMA Water Services \u2014 Compliance Inspection System', 40, y, { lineBreak: false })
-  doc.font('Helvetica').fontSize(7).fillColor(COLORS.lightText)
-    .text(`Report ID: ${reportId}`, 40, y + 10, { lineBreak: false })
-  doc.font('Helvetica').fontSize(7).fillColor(COLORS.lightText)
-    .text(`Page ${pageNum}`, doc.page.width - 80, y, { width: 40, align: 'right', lineBreak: false })
-  doc.font('Helvetica').fontSize(7).fillColor(COLORS.lightText)
-    .text('\u00A9 2026 NAMA Water Services SAOC', doc.page.width - 200, y + 10, { width: 160, align: 'right', lineBreak: false })
-}
-
-function drawSectionHeader(doc: PDFKit.PDFDocument, y: number, title: string): number {
-  doc.rect(40, y, 4, 22).fill(COLORS.primary)
-  doc.font('Helvetica-Bold').fontSize(14).fillColor(COLORS.darkText)
-    .text(title, 52, y + 3, { lineBreak: false })
-  return y + 35
-}
-
-function drawKPIBox(
-  doc: PDFKit.PDFDocument, x: number, y: number, width: number,
-  value: string, label: string, sublabel?: string, valueColor?: string
-): void {
-  doc.rect(x, y, width, 70).lineWidth(1).strokeColor(COLORS.border).stroke()
-  doc.font('Helvetica-Bold').fontSize(22).fillColor(valueColor || COLORS.primary)
-    .text(value, x, y + 12, { width, align: 'center', lineBreak: false })
-  doc.font('Helvetica').fontSize(8).fillColor(COLORS.mediumText)
-    .text(label, x, y + 40, { width, align: 'center', lineBreak: false })
-  if (sublabel) {
-    doc.font('Helvetica').fontSize(7).fillColor(COLORS.lightText)
-      .text(sublabel, x, y + 52, { width, align: 'center', lineBreak: false })
-  }
-}
-
-function drawTableHeaderRow(
-  doc: PDFKit.PDFDocument, y: number,
-  columns: { text: string; x: number; width: number }[]
-): number {
-  const rowHeight = 22
-  const totalWidth = columns[columns.length - 1].x + columns[columns.length - 1].width - columns[0].x
-  doc.rect(columns[0].x, y, totalWidth, rowHeight).fill(COLORS.headerBg)
-
-  for (const col of columns) {
-    doc.font('Helvetica-Bold').fontSize(7).fillColor(COLORS.headerText)
-      .text(col.text, col.x + 4, y + 7, { width: col.width - 8, lineBreak: false })
-  }
-  return y + rowHeight
-}
-
-function drawTableRow(
-  doc: PDFKit.PDFDocument, y: number,
-  cells: { text: string; x: number; width: number; color?: string; bg?: string; bold?: boolean }[],
-  isAlt = false
-): number {
-  const rowHeight = 22
-
-  // Alternate row background
-  if (isAlt) {
-    const totalWidth = cells[cells.length - 1].x + cells[cells.length - 1].width - cells[0].x
-    doc.rect(cells[0].x, y, totalWidth, rowHeight).fill(COLORS.lightBg)
-  }
-
-  for (const cell of cells) {
-    if (cell.bg) {
-      doc.roundedRect(cell.x + 2, y + 3, cell.width - 4, rowHeight - 6, 2).fill(cell.bg)
-    }
-    doc.font(cell.bold ? 'Helvetica-Bold' : 'Helvetica')
-      .fontSize(7.5)
-      .fillColor(cell.color || COLORS.darkText)
-      .text(cell.text, cell.x + 4, y + 6, { width: cell.width - 8, lineBreak: false })
-  }
-
-  // Bottom border
-  doc.moveTo(cells[0].x, y + rowHeight)
-    .lineTo(cells[cells.length - 1].x + cells[cells.length - 1].width, y + rowHeight)
-    .strokeColor(COLORS.border).lineWidth(0.5).stroke()
-
-  return y + rowHeight
-}
-
-function drawHorizontalBar(
-  doc: PDFKit.PDFDocument, x: number, y: number, maxWidth: number,
-  value: number, label: string
-): number {
-  doc.font('Helvetica').fontSize(8).fillColor(COLORS.darkText)
-    .text(label, x, y + 2, { width: 120, lineBreak: false })
-
-  const barX = x + 130
-  const barWidth = maxWidth - 130 - 50
-  const fillWidth = (value / 100) * barWidth
-
-  doc.rect(barX, y + 1, barWidth, 14).fill('#EEEEEE')
-  doc.rect(barX, y + 1, fillWidth, 14).fill(scoreColor(value))
-
-  doc.font('Helvetica-Bold').fontSize(8).fillColor(COLORS.darkText)
-    .text(`${value.toFixed(1)}%`, barX + barWidth + 5, y + 2, { width: 45, lineBreak: false })
-
-  return y + 22
-}
-
-// ─── Page Management ────────────────────────────────────────────────────────
-
-function needsNewPage(doc: PDFKit.PDFDocument, y: number, requiredSpace: number): boolean {
-  const bottomMargin = 60
-  const maxY = doc.page.height - bottomMargin
-  return y + requiredSpace > maxY
-}
-
-function addNewPage(
-  doc: PDFKit.PDFDocument, reportType: string, reportId: string,
-  pageCounter: { value: number }, isLandscape: boolean
-): number {
-  doc.addPage({ size: 'A4', layout: isLandscape ? 'landscape' : 'portrait', margin: 40 })
-  pageCounter.value++
-  drawHeader(doc, reportType)
-  drawFooter(doc, reportId, pageCounter.value)
-  return 100
-}
-
-// ─── Shared data computation ───────────────────────────────────────────────
-
-interface WOScore {
-  wo: WorkOrderWithRelations
-  overall: number | null
-  cats: ReturnType<typeof computeCategoryScores>
-}
-
-function computeAllScores(workOrders: WorkOrderWithRelations[]): WOScore[] {
-  const results: WOScore[] = []
-  for (const wo of workOrders) {
-    if (wo.inspection && wo.inspection.responses.length > 0) {
-      const cats = computeCategoryScores(wo.inspection.responses)
-      const overall = computeOverallScore(cats, wo.scoringWeights)
-      results.push({ wo, overall, cats })
-    } else {
-      results.push({ wo, overall: null, cats: { hse: null, technical: null, process: null, closure: null } })
-    }
-  }
-  return results
-}
-
-function truncate(str: string, len: number): string {
-  return str.length > len ? str.substring(0, len - 1) + '..' : str
-}
-
+function isInspected(wo: WorkOrderWithRelations): boolean { return wo.inspection?.status === 'SUBMITTED' }
+function scoreColor(s: number): string { return s >= 90 ? '#27AE60' : s >= 75 ? '#E67E22' : '#C0392B' }
+function scoreBg(s: number): string { return s >= 90 ? '#E8F5E9' : s >= 75 ? '#FFF3E0' : '#FFEBEE' }
+function durationColor(d: number): string { return d <= 7 ? '#27AE60' : d <= 10 ? '#E67E22' : '#C0392B' }
+function fmtDate(d: Date | null | string): string { if (!d) return '\u2014'; return new Date(d).toLocaleDateString('en-US', { month: 'short', day: '2-digit', year: 'numeric' }) }
+const catAvg = (a: number[]) => a.length ? a.reduce((x, y) => x + y, 0) / a.length : 0
 const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 const MONTH_FULL = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']
+const CATEGORY_LABELS: Record<string, string> = { HSE: 'HSE & Safety', TECH: 'Technical Installation', PROC: 'Process & Communication', CLOSE: 'Site Closure', TECHNICAL: 'Technical Installation', PROCESS: 'Process & Communication', CLOSURE: 'Site Closure' }
 
-// ─── Performance Summary Report (Portrait A4) ─────────────────────────────
+interface WOScore { wo: WorkOrderWithRelations; overall: number | null; cats: ReturnType<typeof computeCategoryScores> }
+function computeAllScores(wos: WorkOrderWithRelations[]): WOScore[] {
+  return wos.map(wo => {
+    if (wo.inspection && wo.inspection.responses.length > 0) {
+      const cats = computeCategoryScores(wo.inspection.responses)
+      return { wo, overall: computeOverallScore(cats, wo.scoringWeights), cats }
+    }
+    return { wo, overall: null, cats: { hse: null, technical: null, process: null, closure: null } }
+  })
+}
 
-function generatePerformanceSummary(
-  doc: PDFKit.PDFDocument, workOrders: WorkOrderWithRelations[],
-  regionNames: string[], years: number[], months: number[],
-  reportId: string, pageCounter: { value: number }
-): void {
-  const REPORT_TITLE = 'Performance Summary Report'
-  const isLandscape = false
+// ─── Logo ───────────────────────────────────────────────────────────────────
 
-  // ── Compute aggregated data ──
+function getLogoBase64(): string {
+  try { return `data:image/png;base64,${fs.readFileSync(path.resolve(__dirname, '../../assets/nama-logo.png')).toString('base64')}` } catch { return '' }
+}
+
+// ─── SVG Helpers ────────────────────────────────────────────────────────────
+
+function lineChartSVG(data: { label: string; value: number | null }[], targetLine: number): string {
+  const W = 680, H = 220, PAD_L = 45, PAD_R = 30, PAD_T = 30, PAD_B = 35
+  const chartW = W - PAD_L - PAD_R, chartH = H - PAD_T - PAD_B
+  const points = data.filter(d => d.value !== null) as { label: string; value: number }[]
+  if (points.length === 0) return '<p style="color:#999;font-style:italic;text-align:center">No trend data available</p>'
+
+  const minY = Math.min(70, ...points.map(p => p.value)) - 2
+  const maxY = Math.max(100, ...points.map(p => p.value)) + 2
+  const yRange = maxY - minY
+  const xStep = chartW / (data.length - 1 || 1)
+  const toX = (i: number) => PAD_L + i * xStep
+  const toY = (v: number) => PAD_T + chartH - ((v - minY) / yRange) * chartH
+
+  // Grid lines
+  const gridYs = [minY, minY + yRange * 0.25, minY + yRange * 0.5, minY + yRange * 0.75, maxY].map(v => Math.round(v))
+  let svg = `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" style="display:block;margin:0 auto">`
+
+  // Grid
+  for (const gy of gridYs) {
+    const y = toY(gy)
+    svg += `<line x1="${PAD_L}" y1="${y}" x2="${W - PAD_R}" y2="${y}" stroke="#e5e7eb" stroke-width="1"/>`
+    svg += `<text x="${PAD_L - 5}" y="${y + 3}" text-anchor="end" font-size="8" fill="#6b7280">${gy}%</text>`
+  }
+
+  // Target line
+  const targetY = toY(targetLine)
+  svg += `<line x1="${PAD_L}" y1="${targetY}" x2="${W - PAD_R}" y2="${targetY}" stroke="#27AE60" stroke-width="1.5" stroke-dasharray="6,4"/>`
+  svg += `<text x="${W - PAD_R + 3}" y="${targetY + 3}" font-size="7" fill="#27AE60">Target ${targetLine}%</text>`
+
+  // X labels
+  data.forEach((d, i) => {
+    svg += `<text x="${toX(i)}" y="${H - 5}" text-anchor="middle" font-size="7" fill="#6b7280">${d.label}</text>`
+  })
+
+  // Line + dots
+  const validIdxs = data.map((d, i) => d.value !== null ? i : -1).filter(i => i >= 0)
+  if (validIdxs.length > 1) {
+    const pathD = validIdxs.map((idx, j) => `${j === 0 ? 'M' : 'L'}${toX(idx).toFixed(1)},${toY(data[idx].value!).toFixed(1)}`).join(' ')
+    svg += `<path d="${pathD}" stroke="#02474E" stroke-width="2.5" fill="none"/>`
+  }
+  for (const idx of validIdxs) {
+    const x = toX(idx), y = toY(data[idx].value!)
+    svg += `<circle cx="${x}" cy="${y}" r="4" fill="#02474E"/>`
+    svg += `<text x="${x}" y="${y - 8}" text-anchor="middle" font-size="7.5" font-weight="bold" fill="#02474E">${data[idx].value!.toFixed(1)}%</text>`
+  }
+
+  svg += '</svg>'
+  return svg
+}
+
+function verticalBarChartSVG(buckets: { label: string; count: number; color: string }[]): string {
+  const W = 520, H = 200, PAD_L = 20, PAD_R = 20, PAD_T = 30, PAD_B = 30
+  const chartW = W - PAD_L - PAD_R, chartH = H - PAD_T - PAD_B
+  const maxVal = Math.max(...buckets.map(b => b.count), 1)
+  const barW = chartW / buckets.length * 0.6
+  const gap = chartW / buckets.length
+
+  let svg = `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" style="display:block;margin:0 auto">`
+
+  buckets.forEach((b, i) => {
+    const x = PAD_L + i * gap + (gap - barW) / 2
+    const barH = (b.count / maxVal) * chartH
+    const y = PAD_T + chartH - barH
+
+    svg += `<rect x="${x}" y="${y}" width="${barW}" height="${barH}" fill="${b.color}" rx="3"/>`
+    svg += `<text x="${x + barW / 2}" y="${y - 5}" text-anchor="middle" font-size="10" font-weight="bold" fill="#333">${b.count}</text>`
+    svg += `<text x="${x + barW / 2}" y="${H - 8}" text-anchor="middle" font-size="7.5" fill="#666">${b.label}</text>`
+  })
+
+  svg += '</svg>'
+  return svg
+}
+
+// ─── Shared HTML Parts ──────────────────────────────────────────────────────
+
+function scoreCell(score: number | null, ins: boolean): string {
+  if (!ins || score === null) return '<span style="color:#999">\u2014</span>'
+  return `<span style="background:${scoreBg(score)};color:${scoreColor(score)};font-weight:700;padding:2px 6px;border-radius:3px;display:inline-block;min-width:40px;text-align:center">${score.toFixed(1)}%</span>`
+}
+
+function headerHTML(reportType: string, logo: string): string {
+  const today = new Date().toLocaleDateString('en-US', { month: 'long', day: '2-digit', year: 'numeric' })
+  return `<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
+    <div style="display:flex;align-items:center;gap:12px">
+      ${logo ? `<img src="${logo}" style="height:50px"/>` : ''}
+      <div><div style="font-size:14pt;font-weight:700;color:#333">NAMA WATER SERVICES</div><div style="font-size:8pt;color:#666">${reportType}</div></div>
+    </div>
+    <div style="text-align:right;font-size:7.5pt;color:#666">Generated: ${today}<br>CONFIDENTIAL<br><span style="display:inline-block;background:#C0392B;color:#fff;font-size:7pt;font-weight:700;padding:3px 10px;border-radius:3px;margin-top:3px">INTERNAL USE ONLY</span></div>
+  </div>
+  <div style="height:4px;display:flex;margin-bottom:16px"><div style="flex:1;background:#C0392B"></div><div style="flex:1;background:#E67E22"></div><div style="flex:1;background:#27AE60"></div><div style="flex:1;background:#02474E"></div></div>`
+}
+
+function sectionHeader(title: string): string {
+  return `<div style="display:flex;align-items:center;gap:8px;margin:16px 0 8px"><div style="width:4px;height:22px;background:#02474E;border-radius:2px"></div><div style="font-size:14pt;font-weight:700;color:#333">${title}</div></div>`
+}
+
+function kpiBox(value: string, label: string, sub?: string, color?: string): string {
+  return `<div style="flex:1;border:1px solid #ddd;border-radius:6px;padding:12px 6px;text-align:center">
+    <div style="font-size:22pt;font-weight:700;color:${color || '#02474E'}">${value}</div>
+    <div style="font-size:7.5pt;color:#666;margin-top:4px">${label}</div>
+    ${sub ? `<div style="font-size:6.5pt;color:#999;margin-top:2px">${sub}</div>` : ''}
+  </div>`
+}
+
+function horizontalBar(label: string, value: number): string {
+  return `<div style="display:flex;align-items:center;margin-bottom:5px">
+    <div style="width:170px;font-size:9pt">${label}</div>
+    <div style="flex:1;height:18px;background:#eee;border-radius:3px;overflow:hidden;margin-right:8px"><div style="height:100%;width:${Math.min(value, 100)}%;background:${scoreColor(value)};border-radius:3px"></div></div>
+    <div style="width:50px;font-size:9pt;font-weight:700;text-align:right;color:${scoreColor(value)}">${value.toFixed(1)}%</div>
+  </div>`
+}
+
+const CSS = `
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family: 'Segoe UI', Arial, Helvetica, sans-serif; font-size:9pt; color:#333; line-height:1.4; padding:0 }
+  .page-break { page-break-before:always }
+  .avoid-break { page-break-inside:avoid }
+  table { width:100%; border-collapse:collapse; font-size:8pt; margin-bottom:6px }
+  th { background:#02474E; color:#fff; font-weight:600; padding:6px 5px; text-align:left; font-size:7.5pt }
+  td { padding:5px; border-bottom:1px solid #eee; vertical-align:middle }
+  tr:nth-child(even) { background:#fafafa }
+  tr.row-pending { background:#FFFDE7 !important }
+  tr.row-low { background:#FFEBEE !important }
+  .note { font-size:7pt; color:#999; font-style:italic; margin:3px 0 10px }
+`
+
+// ─── Performance Summary HTML ───────────────────────────────────────────────
+
+function generatePerformanceSummaryHTML(
+  workOrders: WorkOrderWithRelations[], regionNames: string[],
+  years: number[], months: number[], logo: string,
+  checklistItemMap: Map<string, { question: string; category: string }>
+): string {
   const woScores = computeAllScores(workOrders)
-
-  const inspectedWOs = workOrders.filter(wo =>
-    wo.inspection && wo.inspection.status === 'COMPLETED'
-  )
-  const pendingWOs = workOrders.filter(wo =>
-    !wo.inspection || wo.inspection.status !== 'COMPLETED'
-  )
-
+  const inspectedWOs = workOrders.filter(isInspected)
+  const pendingWOs = workOrders.filter(wo => !isInspected(wo))
   const scoredWOs = woScores.filter(ws => ws.overall !== null)
-  const avgScore = scoredWOs.length > 0
-    ? scoredWOs.reduce((s, ws) => s + (ws.overall ?? 0), 0) / scoredWOs.length
-    : 0
+  const avgScore = scoredWOs.length > 0 ? scoredWOs.reduce((s, ws) => s + (ws.overall ?? 0), 0) / scoredWOs.length : 0
 
-  // Contractor aggregation
   const contractorMap = new Map<string, { name: string; cr: string; wos: WOScore[]; total: number }>()
   for (const ws of woScores) {
     const cr = ws.wo.contractorCr
-    if (!contractorMap.has(cr)) {
-      contractorMap.set(cr, {
-        name: ws.wo.contractor.companyName,
-        cr,
-        wos: [],
-        total: workOrders.filter(w => w.contractorCr === cr).length,
-      })
-    }
+    if (!contractorMap.has(cr)) contractorMap.set(cr, { name: ws.wo.contractor.companyName, cr, wos: [], total: workOrders.filter(w => w.contractorCr === cr).length })
     contractorMap.get(cr)!.wos.push(ws)
   }
-
   const contractors = Array.from(contractorMap.values()).map(c => {
     const scored = c.wos.filter(ws => ws.overall !== null)
     const avg = scored.length > 0 ? scored.reduce((s, ws) => s + (ws.overall ?? 0), 0) / scored.length : 0
-    const inspected = scored.length
-    const pending = c.total - inspected
-    return { ...c, avgScore: avg, inspected, pending }
+    return { ...c, avgScore: avg, inspected: scored.length, pending: c.total - scored.length }
   }).sort((a, b) => b.avgScore - a.avgScore)
 
-  // Unique contractors
   const uniqueContractors = new Set(workOrders.map(w => w.contractorCr))
-
-  // Overdue count (pending > 3 days past target)
   const now = new Date()
-  const overdueCount = pendingWOs.filter(wo => {
-    const target = new Date(wo.targetCompletionDate)
-    const diff = (now.getTime() - target.getTime()) / (1000 * 60 * 60 * 24)
-    return diff > 3
-  }).length
+  const overdueCount = pendingWOs.filter(wo => (now.getTime() - new Date(wo.targetCompletionDate).getTime()) / 86400000 > 3).length
+  const monthRange = months.length > 0 ? `${MONTH_NAMES[months[0] - 1]} \u2013 ${MONTH_NAMES[months[months.length - 1] - 1]}` : 'All Months'
 
-  // Month range label
-  const monthRange = months.length > 0
-    ? `${MONTH_NAMES[months[0] - 1]} - ${MONTH_NAMES[months[months.length - 1] - 1]}`
-    : 'All Months'
-
-  // ── PAGE 1 ──
-  drawHeader(doc, REPORT_TITLE)
-  drawFooter(doc, reportId, pageCounter.value)
-
-  let y = 100
-
-  // Title
-  doc.font('Helvetica-Bold').fontSize(22).fillColor(COLORS.primary)
-    .text('Performance Summary Report', 40, y, { width: doc.page.width - 80, align: 'center', lineBreak: false })
-  y += 30
-
-  // Subtitle
-  doc.font('Helvetica').fontSize(10).fillColor(COLORS.mediumText)
-    .text(
-      `Region: ${regionNames.length > 0 ? regionNames.join(', ') : 'All Regions'} | Year: ${years.join(', ')} | Months: ${monthRange}`,
-      40, y, { width: doc.page.width - 80, align: 'center', lineBreak: false }
-    )
-  y += 30
-
-  // ── Executive Overview ──
-  y = drawSectionHeader(doc, y, 'Executive Overview')
-
-  const boxWidth = (doc.page.width - 80 - 30) / 4
-  drawKPIBox(doc, 40, y, boxWidth,
-    `${avgScore.toFixed(1)}%`, 'Avg Compliance Score', 'Target: 90%', scoreColor(avgScore))
-  drawKPIBox(doc, 40 + boxWidth + 10, y, boxWidth,
-    `${workOrders.length}`, 'Total Work Orders', `${inspectedWOs.length} Inspected, ${pendingWOs.length} Pending`)
-  drawKPIBox(doc, 40 + 2 * (boxWidth + 10), y, boxWidth,
-    `${uniqueContractors.size}`, 'Active Contractors')
-  drawKPIBox(doc, 40 + 3 * (boxWidth + 10), y, boxWidth,
-    `${pendingWOs.length}`, 'Pending Inspections', `${overdueCount} Overdue (>3 days)`)
-  y += 85
-
-  // ── Contractor Performance Ranking ──
-  if (needsNewPage(doc, y, 60)) {
-    y = addNewPage(doc, REPORT_TITLE, reportId, pageCounter, isLandscape)
-  }
-  y = drawSectionHeader(doc, y, 'Contractor Performance Ranking')
-
-  const rankColumns = [
-    { text: '#', x: 40, width: 30 },
-    { text: 'Contractor', x: 70, width: 160 },
-    { text: 'CR#', x: 230, width: 80 },
-    { text: 'Work Orders', x: 310, width: 60 },
-    { text: 'Avg Score', x: 370, width: 70 },
-    { text: 'Inspected', x: 440, width: 60 },
-    { text: 'Pending', x: 500, width: 60 },
-  ]
-  y = drawTableHeaderRow(doc, y, rankColumns)
-
-  for (let i = 0; i < contractors.length; i++) {
-    if (needsNewPage(doc, y, 22)) {
-      y = addNewPage(doc, REPORT_TITLE, reportId, pageCounter, isLandscape)
-      y = drawTableHeaderRow(doc, y, rankColumns)
-    }
-    const c = contractors[i]
-    y = drawTableRow(doc, y, [
-      { text: `${i + 1}`, x: 40, width: 30 },
-      { text: c.name, x: 70, width: 160, bold: true },
-      { text: c.cr, x: 230, width: 80 },
-      { text: `${c.total}`, x: 310, width: 60 },
-      { text: `${c.avgScore.toFixed(1)}%`, x: 370, width: 70, color: scoreColor(c.avgScore), bg: scoreBg(c.avgScore), bold: true },
-      { text: `${c.inspected}`, x: 440, width: 60 },
-      { text: `${c.pending}`, x: 500, width: 60 },
-    ], i % 2 === 1)
-  }
-  y += 15
-
-  // ── Category-wise Compliance (All Contractors Average) ──
-  if (needsNewPage(doc, y, 130)) {
-    y = addNewPage(doc, REPORT_TITLE, reportId, pageCounter, isLandscape)
-  }
-  y = drawSectionHeader(doc, y, 'Category-wise Compliance (All Contractors Average)')
-
+  // Category averages
   const allCats = { hse: [] as number[], tech: [] as number[], process: [] as number[], closure: [] as number[] }
   for (const ws of scoredWOs) {
     if (ws.cats.hse !== null) allCats.hse.push(ws.cats.hse)
@@ -466,469 +253,219 @@ function generatePerformanceSummary(
     if (ws.cats.process !== null) allCats.process.push(ws.cats.process)
     if (ws.cats.closure !== null) allCats.closure.push(ws.cats.closure)
   }
-  const catAvg = (arr: number[]) => arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : 0
+  const catScores = [
+    { name: 'Site Closure', score: catAvg(allCats.closure) }, { name: 'Technical Installation', score: catAvg(allCats.tech) },
+    { name: 'HSE & Safety', score: catAvg(allCats.hse) }, { name: 'Process & Communication', score: catAvg(allCats.process) },
+  ].sort((a, b) => a.score - b.score)
 
-  y = drawHorizontalBar(doc, 40, y, doc.page.width - 80, catAvg(allCats.hse), 'HSE & Safety')
-  y = drawHorizontalBar(doc, 40, y, doc.page.width - 80, catAvg(allCats.tech), 'Technical Installation')
-  y = drawHorizontalBar(doc, 40, y, doc.page.width - 80, catAvg(allCats.process), 'Process & Communication')
-  y = drawHorizontalBar(doc, 40, y, doc.page.width - 80, catAvg(allCats.closure), 'Site Closure')
-  y += 15
-
-  // ── Score Distribution (All Inspected Work Orders) ──
-  if (needsNewPage(doc, y, 130)) {
-    y = addNewPage(doc, REPORT_TITLE, reportId, pageCounter, isLandscape)
-  }
-  y = drawSectionHeader(doc, y, 'Score Distribution (All Inspected Work Orders)')
-
+  // Score distribution buckets
   const buckets = [
-    { label: '0-49%', min: 0, max: 49, count: 0, color: COLORS.red },
-    { label: '50-74%', min: 50, max: 74, count: 0, color: COLORS.orange },
-    { label: '75-89%', min: 75, max: 89, count: 0, color: COLORS.orange },
-    { label: '90-100%', min: 90, max: 100, count: 0, color: COLORS.green },
+    { label: '< 75%', min: 0, max: 74.9, count: 0, color: '#C0392B' },
+    { label: '75-79%', min: 75, max: 79.9, count: 0, color: '#E67E22' },
+    { label: '80-84%', min: 80, max: 84.9, count: 0, color: '#F0C040' },
+    { label: '85-89%', min: 85, max: 89.9, count: 0, color: '#02474E' },
+    { label: '90-94%', min: 90, max: 94.9, count: 0, color: '#27AE60' },
+    { label: '95-100%', min: 95, max: 100, count: 0, color: '#1B7A3D' },
   ]
-  for (const ws of scoredWOs) {
-    const s = ws.overall ?? 0
-    for (const b of buckets) {
-      if (s >= b.min && s <= b.max) { b.count++; break }
-    }
-  }
-  const maxCount = Math.max(...buckets.map(b => b.count), 1)
-  const barMaxWidth = doc.page.width - 80 - 130 - 50
+  for (const ws of scoredWOs) { const s = ws.overall ?? 0; for (const b of buckets) { if (s >= b.min && s <= b.max) { b.count++; break } } }
 
-  for (const bucket of buckets) {
-    const barWidth = (bucket.count / maxCount) * barMaxWidth
-    doc.font('Helvetica').fontSize(8).fillColor(COLORS.darkText)
-      .text(bucket.label, 40, y + 2, { width: 120, lineBreak: false })
-
-    const barX = 170
-    doc.rect(barX, y + 1, Math.max(barWidth, 2), 14).fill(bucket.color)
-
-    doc.font('Helvetica-Bold').fontSize(8).fillColor(COLORS.darkText)
-      .text(`${bucket.count}`, barX + Math.max(barWidth, 2) + 8, y + 2, { width: 40, lineBreak: false })
-    y += 22
-  }
-  y += 15
-
-  // ── PAGE 2 ──
-  y = addNewPage(doc, REPORT_TITLE, reportId, pageCounter, isLandscape)
-
-  // ── Compliance Trend (Monthly Average) ──
-  y = drawSectionHeader(doc, y, 'Compliance Trend (Monthly Average)')
-
-  const trendColumns = [
-    { text: 'Month', x: 40, width: 120 },
-    { text: 'Work Orders', x: 160, width: 80 },
-    { text: 'Avg Score', x: 240, width: 80 },
-    { text: 'Inspected', x: 320, width: 80 },
-  ]
-  y = drawTableHeaderRow(doc, y, trendColumns)
-
-  // Always show all 12 months
-  for (let mi = 0; mi < 12; mi++) {
-    const month = mi + 1
-    const monthWOs = woScores.filter(ws => {
-      const d = new Date(ws.wo.allocationDate)
-      return d.getMonth() + 1 === month
-    })
+  // Monthly trend data for line chart
+  const trendData = Array.from({ length: 12 }, (_, mi) => {
+    const monthWOs = woScores.filter(ws => new Date(ws.wo.allocationDate).getMonth() === mi)
     const monthScored = monthWOs.filter(ws => ws.overall !== null)
-    const monthAvg = monthScored.length > 0
-      ? monthScored.reduce((s, ws) => s + (ws.overall ?? 0), 0) / monthScored.length
-      : 0
+    const monthAvg = monthScored.length > 0 ? monthScored.reduce((s, ws) => s + (ws.overall ?? 0), 0) / monthScored.length : null
+    return { label: `${MONTH_NAMES[mi]} ${years[0]}`, value: monthAvg }
+  })
 
-    if (needsNewPage(doc, y, 22)) {
-      y = addNewPage(doc, REPORT_TITLE, reportId, pageCounter, isLandscape)
-      y = drawTableHeaderRow(doc, y, trendColumns)
-    }
-
-    y = drawTableRow(doc, y, [
-      { text: MONTH_FULL[mi], x: 40, width: 120 },
-      { text: `${monthWOs.length}`, x: 160, width: 80 },
-      {
-        text: monthScored.length > 0 ? `${monthAvg.toFixed(1)}%` : '\u2014',
-        x: 240, width: 80,
-        color: monthScored.length > 0 ? scoreColor(monthAvg) : COLORS.lightText,
-        bg: monthScored.length > 0 ? scoreBg(monthAvg) : undefined,
-        bold: monthScored.length > 0,
-      },
-      { text: `${monthScored.length}`, x: 320, width: 80 },
-    ], mi % 2 === 1)
-  }
-  y += 20
-
-  // ── Per-Category Comparison by Contractor ──
-  if (needsNewPage(doc, y, 60)) {
-    y = addNewPage(doc, REPORT_TITLE, reportId, pageCounter, isLandscape)
-  }
-  y = drawSectionHeader(doc, y, 'Per-Category Comparison by Contractor')
-
-  const catCompColumns = [
-    { text: 'Contractor', x: 40, width: 150 },
-    { text: 'HSE & Safety', x: 190, width: 90 },
-    { text: 'Technical', x: 280, width: 90 },
-    { text: 'Process', x: 370, width: 90 },
-    { text: 'Closure', x: 460, width: 90 },
-  ]
-  y = drawTableHeaderRow(doc, y, catCompColumns)
-
-  for (let i = 0; i < contractors.length; i++) {
-    if (needsNewPage(doc, y, 22)) {
-      y = addNewPage(doc, REPORT_TITLE, reportId, pageCounter, isLandscape)
-      y = drawTableHeaderRow(doc, y, catCompColumns)
-    }
-    const c = contractors[i]
-    const cCats = { hse: [] as number[], tech: [] as number[], process: [] as number[], closure: [] as number[] }
-    for (const ws of c.wos) {
-      if (ws.cats.hse !== null) cCats.hse.push(ws.cats.hse)
-      if (ws.cats.technical !== null) cCats.tech.push(ws.cats.technical)
-      if (ws.cats.process !== null) cCats.process.push(ws.cats.process)
-      if (ws.cats.closure !== null) cCats.closure.push(ws.cats.closure)
-    }
-    const hseAvg = catAvg(cCats.hse)
-    const techAvg = catAvg(cCats.tech)
-    const procAvg = catAvg(cCats.process)
-    const closeAvg = catAvg(cCats.closure)
-
-    y = drawTableRow(doc, y, [
-      { text: c.name, x: 40, width: 150, bold: true },
-      {
-        text: cCats.hse.length > 0 ? `${hseAvg.toFixed(1)}%` : '\u2014',
-        x: 190, width: 90,
-        color: cCats.hse.length > 0 ? scoreColor(hseAvg) : COLORS.lightText,
-        bg: cCats.hse.length > 0 ? scoreBg(hseAvg) : undefined,
-      },
-      {
-        text: cCats.tech.length > 0 ? `${techAvg.toFixed(1)}%` : '\u2014',
-        x: 280, width: 90,
-        color: cCats.tech.length > 0 ? scoreColor(techAvg) : COLORS.lightText,
-        bg: cCats.tech.length > 0 ? scoreBg(techAvg) : undefined,
-      },
-      {
-        text: cCats.process.length > 0 ? `${procAvg.toFixed(1)}%` : '\u2014',
-        x: 370, width: 90,
-        color: cCats.process.length > 0 ? scoreColor(procAvg) : COLORS.lightText,
-        bg: cCats.process.length > 0 ? scoreBg(procAvg) : undefined,
-      },
-      {
-        text: cCats.closure.length > 0 ? `${closeAvg.toFixed(1)}%` : '\u2014',
-        x: 460, width: 90,
-        color: cCats.closure.length > 0 ? scoreColor(closeAvg) : COLORS.lightText,
-        bg: cCats.closure.length > 0 ? scoreBg(closeAvg) : undefined,
-      },
-    ], i % 2 === 1)
-  }
-  y += 20
-
-  // ── Lowest Scoring Checklist Items (All Contractors) ──
-  if (needsNewPage(doc, y, 150)) {
-    y = addNewPage(doc, REPORT_TITLE, reportId, pageCounter, isLandscape)
-  }
-  y = drawSectionHeader(doc, y, 'Lowest Scoring Checklist Items (All Contractors)')
-
-  // Aggregate by checklist item
+  // Lowest scoring items
   const itemScores = new Map<string, number[]>()
-  for (const ws of woScores) {
-    if (!ws.wo.inspection) continue
-    for (const r of ws.wo.inspection.responses) {
-      const score = ratingToScore(r.rating)
-      if (score === null) continue
-      if (!itemScores.has(r.checklistItemId)) itemScores.set(r.checklistItemId, [])
-      itemScores.get(r.checklistItemId)!.push(score)
-    }
-  }
+  for (const ws of woScores) { if (!ws.wo.inspection) continue; for (const r of ws.wo.inspection.responses) { const s = ratingToScore(r.rating); if (s === null) continue; if (!itemScores.has(r.checklistItemId)) itemScores.set(r.checklistItemId, []); itemScores.get(r.checklistItemId)!.push(s) } }
   const lowestItems = Array.from(itemScores.entries())
-    .map(([id, scores]) => ({ id, avg: scores.reduce((a, b) => a + b, 0) / scores.length, count: scores.length }))
-    .sort((a, b) => a.avg - b.avg)
-    .slice(0, 5)
+    .map(([id, scores]) => ({ id, question: checklistItemMap.get(id)?.question ?? id, category: CATEGORY_LABELS[checklistItemMap.get(id)?.category ?? ''] ?? '', avg: scores.reduce((a, b) => a + b, 0) / scores.length }))
+    .sort((a, b) => a.avg - b.avg).slice(0, 5)
 
-  const lowestColumns = [
-    { text: '#', x: 40, width: 30 },
-    { text: 'Checklist Item', x: 70, width: 150 },
-    { text: 'Avg Score', x: 220, width: 80 },
-    { text: 'Responses', x: 300, width: 80 },
-  ]
-  y = drawTableHeaderRow(doc, y, lowestColumns)
+  return `<!DOCTYPE html><html><head><style>${CSS}</style></head><body>
+    ${headerHTML('Performance Summary Report', logo)}
+    <div style="text-align:center;font-size:22pt;font-weight:700;color:#02474E;margin:12px 0 4px">Performance Summary Report</div>
+    <div style="text-align:center;font-size:9pt;color:#666;margin-bottom:18px">Region: ${regionNames.length > 0 ? regionNames.join(', ') : 'All Regions'} | Year: ${years.join(', ')} | Months: ${monthRange}</div>
 
-  for (let i = 0; i < lowestItems.length; i++) {
-    if (needsNewPage(doc, y, 22)) {
-      y = addNewPage(doc, REPORT_TITLE, reportId, pageCounter, isLandscape)
-      y = drawTableHeaderRow(doc, y, lowestColumns)
-    }
-    const item = lowestItems[i]
-    y = drawTableRow(doc, y, [
-      { text: `${i + 1}`, x: 40, width: 30 },
-      { text: item.id, x: 70, width: 150, bold: true },
-      { text: `${item.avg.toFixed(1)}%`, x: 220, width: 80, color: scoreColor(item.avg), bg: scoreBg(item.avg), bold: true },
-      { text: `${item.count}`, x: 300, width: 80 },
-    ], i % 2 === 1)
-  }
+    ${sectionHeader('Executive Overview')}
+    <div style="display:flex;gap:10px;margin-bottom:16px">
+      ${kpiBox(`${avgScore.toFixed(1)}% <span style="color:#27AE60;font-size:12pt">▲</span>`, 'All Contractors Avg Score', 'Target: 90%', scoreColor(avgScore))}
+      ${kpiBox(`${workOrders.length}`, 'Total Work Orders', `${inspectedWOs.length} Inspected, ${pendingWOs.length} Pending`)}
+      ${kpiBox(`${uniqueContractors.size}`, 'Active Contractors')}
+      ${kpiBox(`${pendingWOs.length}`, 'Pending Inspections', `${overdueCount} Overdue (>3 days)`, '#C0392B')}
+    </div>
+
+    ${sectionHeader('Contractor Performance Ranking')}
+    <table><tr><th>#</th><th>Contractor</th><th>CR #</th><th>Work Orders</th><th>Avg Score</th><th>Score Change</th><th>Inspected</th><th>Pending</th></tr>
+    ${contractors.map((c, i) => `<tr style="${c.avgScore < 90 ? 'background:#FFFDE7' : ''}"><td>${i + 1}</td><td><strong>${c.name}</strong></td><td>${c.cr}</td><td>${c.total}</td><td>${scoreCell(c.avgScore, true)}</td><td style="color:#999">\u2014</td><td>${c.inspected}</td><td>${c.pending}</td></tr>`).join('')}
+    </table>
+    <div class="note">"Score Change" = change vs previous reporting period. Amber/red rows are below the 90% target.</div>
+
+    <div class="avoid-break">
+    ${sectionHeader('Category-wise Compliance (All Contractors Average)')}
+    ${horizontalBar('HSE & Safety', catAvg(allCats.hse))}
+    ${horizontalBar('Technical Installation', catAvg(allCats.tech))}
+    ${horizontalBar('Process & Communication', catAvg(allCats.process))}
+    ${horizontalBar('Site Closure', catAvg(allCats.closure))}
+    <div class="note">${catScores[0].name} and ${catScores[1].name} are the weakest categories across all contractors.</div>
+    </div>
+
+    <div class="avoid-break">
+    ${sectionHeader('Score Distribution (All Inspected Work Orders)')}
+    ${verticalBarChartSVG(buckets)}
+    </div>
+
+    <div class="page-break"></div>
+    ${headerHTML('Performance Summary Report', logo)}
+
+    <div class="avoid-break">
+    ${sectionHeader('Compliance Trend (All Contractors Monthly Average)')}
+    ${lineChartSVG(trendData, 90)}
+    </div>
+
+    <div class="avoid-break">
+    ${sectionHeader('Per-Category Comparison by Contractor')}
+    <table><tr><th>Contractor</th><th>HSE & Safety</th><th>Technical Installation</th><th>Process & Communication</th><th>Site Closure</th><th>Overall</th></tr>
+    ${contractors.map(c => {
+      const cCats = { hse: [] as number[], tech: [] as number[], process: [] as number[], closure: [] as number[] }
+      for (const ws of c.wos) { if (ws.cats.hse !== null) cCats.hse.push(ws.cats.hse); if (ws.cats.technical !== null) cCats.tech.push(ws.cats.technical); if (ws.cats.process !== null) cCats.process.push(ws.cats.process); if (ws.cats.closure !== null) cCats.closure.push(ws.cats.closure) }
+      const fmt = (arr: number[]) => arr.length > 0 ? scoreCell(catAvg(arr), true) : '<span style="color:#999">\u2014</span>'
+      return `<tr><td><strong>${c.name}</strong></td><td>${fmt(cCats.hse)}</td><td>${fmt(cCats.tech)}</td><td>${fmt(cCats.process)}</td><td>${fmt(cCats.closure)}</td><td>${scoreCell(c.avgScore, true)}</td></tr>`
+    }).join('')}
+    <tr style="background:#f0f0f0"><td><strong>ALL CONTRACTORS AVG</strong></td><td><strong>${catAvg(allCats.hse).toFixed(1)}%</strong></td><td><strong>${catAvg(allCats.tech).toFixed(1)}%</strong></td><td><strong>${catAvg(allCats.process).toFixed(1)}%</strong></td><td><strong>${catAvg(allCats.closure).toFixed(1)}%</strong></td><td><strong>${avgScore.toFixed(1)}%</strong></td></tr>
+    </table>
+    </div>
+
+    <div class="avoid-break">
+    ${sectionHeader('Lowest Scoring Checklist Items (All Contractors)')}
+    <table><tr><th>#</th><th>Checklist Item</th><th>Category</th><th>Avg Score %</th></tr>
+    ${lowestItems.map((item, i) => `<tr><td>${i + 1}</td><td>${item.question}</td><td>${item.category}</td><td>${scoreCell(item.avg, true)}</td></tr>`).join('')}
+    </table>
+    </div>
+  </body></html>`
 }
 
-// ─── Contractor Performance Report (Landscape A4) ──────────────────────────
+// ─── Contractor Performance HTML ────────────────────────────────────────────
 
-function generateContractorPerformance(
-  doc: PDFKit.PDFDocument, workOrders: WorkOrderWithRelations[],
-  years: number[], months: number[],
-  reportId: string, pageCounter: { value: number }
-): void {
-  const REPORT_TITLE = 'Contractor Performance Report'
-  const isLandscape = true
-
-  // ── Compute scores ──
+function generateContractorPerformanceHTML(
+  workOrders: WorkOrderWithRelations[], years: number[], months: number[], logo: string
+): string {
   const woScores = computeAllScores(workOrders)
-
-  const inspectedWOs = workOrders.filter(wo => wo.inspection && wo.inspection.status === 'COMPLETED')
-  const pendingWOs = workOrders.filter(wo => !wo.inspection || wo.inspection.status !== 'COMPLETED')
+  const inspectedWOs = workOrders.filter(isInspected)
+  const pendingWOs = workOrders.filter(wo => !isInspected(wo))
   const scoredWOs = woScores.filter(ws => ws.overall !== null)
-  const avgScore = scoredWOs.length > 0
-    ? scoredWOs.reduce((s, ws) => s + (ws.overall ?? 0), 0) / scoredWOs.length
-    : 0
+  const avgScore = scoredWOs.length > 0 ? scoredWOs.reduce((s, ws) => s + (ws.overall ?? 0), 0) / scoredWOs.length : 0
 
-  // Overdue
   const now = new Date()
-  const overdueCount = pendingWOs.filter(wo => {
-    const target = new Date(wo.targetCompletionDate)
-    const diff = (now.getTime() - target.getTime()) / (1000 * 60 * 60 * 24)
-    return diff > 3
-  }).length
-
-  // Unique contractors
   const uniqueContractors = new Map<string, string>()
-  for (const wo of workOrders) {
-    uniqueContractors.set(wo.contractorCr, wo.contractor.companyName)
-  }
+  for (const wo of workOrders) uniqueContractors.set(wo.contractorCr, wo.contractor.companyName)
   const crList = Array.from(uniqueContractors.keys()).join(', ')
-
-  // Rework: WOs that were submitted then sent back (status IN_PROGRESS with a prior submission)
   const reworkCount = workOrders.filter(wo => wo.status === 'IN_PROGRESS' && wo.submissionDate !== null).length
 
-  // ── Page 1 ──
-  drawHeader(doc, REPORT_TITLE)
-  drawFooter(doc, reportId, pageCounter.value)
+  const sortedWOs = [...woScores].sort((a, b) => {
+    const aI = isInspected(a.wo), bI = isInspected(b.wo)
+    if (aI !== bI) return aI ? -1 : 1
+    return new Date(b.wo.allocationDate).getTime() - new Date(a.wo.allocationDate).getTime()
+  })
 
-  let y = 100
+  return `<!DOCTYPE html><html><head><style>${CSS}</style></head><body>
+    ${headerHTML('Contractor Performance Report', logo)}
+    <div style="text-align:center;font-size:22pt;font-weight:700;color:#02474E;margin:10px 0 15px">Contractor Performance Report</div>
 
-  // Title
-  doc.font('Helvetica-Bold').fontSize(22).fillColor(COLORS.primary)
-    .text('Contractor Performance Report', 40, y, { width: doc.page.width - 80, align: 'center', lineBreak: false })
-  y += 40
+    ${sectionHeader('Overview')}
+    <div style="display:flex;gap:8px;margin-bottom:14px">
+      ${kpiBox(`${avgScore.toFixed(1)}% <span style="color:#27AE60;font-size:12pt">▲</span>`, 'Avg Compliance Score', 'Target: 90%', scoreColor(avgScore))}
+      ${kpiBox(`${workOrders.length}`, 'Total Work Orders', `${inspectedWOs.length} Inspected, ${pendingWOs.length} Pending`)}
+      ${kpiBox(`${uniqueContractors.size}`, 'Contractors', crList.length > 30 ? crList.substring(0, 29) + '..' : crList)}
+      ${kpiBox(`${pendingWOs.length}`, 'Pending Inspections')}
+      ${kpiBox(`${reworkCount}`, 'Rework Orders', `out of ${inspectedWOs.length} inspected`)}
+    </div>
 
-  // ── Overview KPIs (5 boxes) ──
-  y = drawSectionHeader(doc, y, 'Overview')
+    ${sectionHeader('Work Order Details')}
+    <table style="font-size:7pt">
+    <tr><th>Work Order</th><th>Contractor</th><th>CR #</th><th>Site</th><th>Region</th><th>Status</th><th>Overall Score</th><th>HSE & Safety</th><th>Technical Install.</th><th>Process & Comm.</th><th>Site Closure</th><th>Rework</th><th>Duration (Days)</th><th>Inspector</th><th>Submitted</th><th>Inspected</th></tr>
+    ${sortedWOs.map(ws => {
+      const wo = ws.wo, ins = isInspected(wo), isPending = !ins, isLow = ws.overall !== null && ws.overall < 85
+      const rowClass = isPending ? 'row-pending' : isLow ? 'row-low' : ''
+      const inspectorName = wo.assignedInspector?.staffProfile?.fullName ?? '\u2014'
+      const days = Math.ceil(((wo.submissionDate ? new Date(wo.submissionDate).getTime() : now.getTime()) - new Date(wo.allocationDate).getTime()) / 86400000)
+      const isRework = wo.status === 'IN_PROGRESS' && wo.submissionDate !== null
+      return `<tr class="${rowClass}">
+        <td>${wo.id}</td><td>${wo.contractor.companyName}</td><td>${wo.contractorCr}</td><td>${wo.siteName}</td><td>${wo.governorate.nameEn}</td>
+        <td style="color:${ins ? '#27AE60' : '#E67E22'};font-weight:700">${ins ? 'INSPECTED' : 'SUBMITTED'}</td>
+        <td>${scoreCell(ws.overall, ins)}</td><td>${scoreCell(ws.cats.hse, ins)}</td><td>${scoreCell(ws.cats.technical, ins)}</td><td>${scoreCell(ws.cats.process, ins)}</td><td>${scoreCell(ws.cats.closure, ins)}</td>
+        <td style="color:${isRework ? '#C0392B' : '#27AE60'};font-weight:700">${isRework ? 'Yes' : 'No'}</td>
+        <td style="color:${durationColor(days)}">${days}</td><td>${inspectorName}</td>
+        <td>${fmtDate(wo.submissionDate)}</td><td>${ins ? fmtDate(wo.inspection!.submittedAt) : '\u2014'}</td>
+      </tr>`
+    }).join('')}
+    </table>
 
-  const boxWidth = (doc.page.width - 80 - 40) / 5
-  drawKPIBox(doc, 40, y, boxWidth,
-    `${avgScore.toFixed(1)}%`, 'Avg Compliance Score', 'Target: 90%', scoreColor(avgScore))
-  drawKPIBox(doc, 40 + (boxWidth + 10), y, boxWidth,
-    `${workOrders.length}`, 'Total Work Orders', `${inspectedWOs.length} Inspected, ${pendingWOs.length} Pending`)
-  drawKPIBox(doc, 40 + 2 * (boxWidth + 10), y, boxWidth,
-    `${uniqueContractors.size}`, 'Contractors', truncate(crList, 30))
-  drawKPIBox(doc, 40 + 3 * (boxWidth + 10), y, boxWidth,
-    `${pendingWOs.length}`, 'Pending Inspections', `${overdueCount} Overdue (>3 days)`)
-  drawKPIBox(doc, 40 + 4 * (boxWidth + 10), y, boxWidth,
-    `${reworkCount}`, 'Rework Orders', `${reworkCount} out of ${inspectedWOs.length} inspected`)
-  y += 85
-
-  // ── Work Order Details (flat table) ──
-  y = drawSectionHeader(doc, y, 'Work Order Details')
-
-  const columns = [
-    { text: 'Work Order', x: 40, width: 65 },
-    { text: 'Contractor', x: 105, width: 70 },
-    { text: 'CR#', x: 175, width: 52 },
-    { text: 'Site', x: 227, width: 60 },
-    { text: 'Region', x: 287, width: 50 },
-    { text: 'Status', x: 337, width: 55 },
-    { text: 'Overall Score', x: 392, width: 48 },
-    { text: 'HSE & Safety', x: 440, width: 44 },
-    { text: 'Technical Install.', x: 484, width: 48 },
-    { text: 'Process & Comm.', x: 532, width: 48 },
-    { text: 'Site Closure', x: 580, width: 42 },
-    { text: 'Rework', x: 622, width: 34 },
-    { text: 'Duration (Days)', x: 656, width: 38 },
-    { text: 'Inspector', x: 694, width: 55 },
-    { text: 'Submitted', x: 749, width: 50 },
-    { text: 'Inspected', x: 799, width: 50 },
-  ]
-  y = drawTableHeaderRow(doc, y, columns)
-
-  for (let i = 0; i < woScores.length; i++) {
-    if (needsNewPage(doc, y, 22)) {
-      y = addNewPage(doc, REPORT_TITLE, reportId, pageCounter, isLandscape)
-      y = drawTableHeaderRow(doc, y, columns)
-    }
-
-    const ws = woScores[i]
-    const wo = ws.wo
-    const isInspected = wo.inspection !== null && wo.inspection.status === 'COMPLETED'
-    const overall = ws.overall
-
-    const inspectorName = wo.assignedInspector?.staffProfile?.fullName ?? '\u2014'
-
-    // Dates
-    const submittedDate = wo.submissionDate
-      ? new Date(wo.submissionDate).toLocaleDateString('en-US', { month: 'short', day: '2-digit' })
-      : '\u2014'
-    const inspectedDate = wo.inspection?.submittedAt
-      ? new Date(wo.inspection.submittedAt).toLocaleDateString('en-US', { month: 'short', day: '2-digit' })
-      : '\u2014'
-
-    // Duration in days
-    const startDate = new Date(wo.allocationDate)
-    const endDate = wo.submissionDate ? new Date(wo.submissionDate) : new Date()
-    const durationDays = Math.ceil((endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24))
-
-    // Rework detection
-    const isRework = wo.status === 'IN_PROGRESS' && wo.submissionDate !== null
-
-    const formatScore = (s: number | null): string => {
-      if (!isInspected || s === null) return '\u2014'
-      return `${s.toFixed(0)}%`
-    }
-    const getScoreColor = (s: number | null): string => {
-      if (!isInspected || s === null) return COLORS.lightText
-      return scoreColor(s)
-    }
-    const getScoreBg = (s: number | null): string | undefined => {
-      if (!isInspected || s === null) return undefined
-      return scoreBg(s)
-    }
-
-    // Status color
-    const statusColor = isInspected ? COLORS.green : COLORS.orange
-    const statusText = isInspected ? 'INSPECTED' : 'SUBMITTED'
-
-    y = drawTableRow(doc, y, [
-      { text: truncate(wo.id, 9), x: 40, width: 65 },
-      { text: truncate(wo.contractor.companyName, 10), x: 105, width: 70 },
-      { text: wo.contractorCr, x: 175, width: 52 },
-      { text: truncate(wo.siteName, 8), x: 227, width: 60 },
-      { text: truncate(wo.governorate.nameEn, 7), x: 287, width: 50 },
-      { text: statusText, x: 337, width: 55, color: statusColor, bold: true },
-      { text: formatScore(overall), x: 392, width: 48, color: getScoreColor(overall), bg: getScoreBg(overall), bold: true },
-      { text: formatScore(ws.cats.hse), x: 440, width: 44, color: getScoreColor(ws.cats.hse), bg: getScoreBg(ws.cats.hse) },
-      { text: formatScore(ws.cats.technical), x: 484, width: 48, color: getScoreColor(ws.cats.technical), bg: getScoreBg(ws.cats.technical) },
-      { text: formatScore(ws.cats.process), x: 532, width: 48, color: getScoreColor(ws.cats.process), bg: getScoreBg(ws.cats.process) },
-      { text: formatScore(ws.cats.closure), x: 580, width: 42, color: getScoreColor(ws.cats.closure), bg: getScoreBg(ws.cats.closure) },
-      { text: isRework ? 'Yes' : 'No', x: 622, width: 34, color: isRework ? COLORS.red : COLORS.green, bold: true },
-      { text: `${durationDays}`, x: 656, width: 38, color: durationColor(durationDays) },
-      { text: truncate(inspectorName, 8), x: 694, width: 55 },
-      { text: submittedDate, x: 749, width: 50 },
-      { text: inspectedDate, x: 799, width: 50 },
-    ], i % 2 === 1)
-  }
-
-  // ── Legend ──
-  y += 20
-  if (needsNewPage(doc, y, 80)) {
-    y = addNewPage(doc, REPORT_TITLE, reportId, pageCounter, isLandscape)
-  }
-
-  doc.font('Helvetica-Bold').fontSize(9).fillColor(COLORS.darkText)
-    .text('Legend:', 40, y, { lineBreak: false })
-  y += 16
-
-  // Score color key
-  const legendScores = [
-    { color: COLORS.greenBg, textColor: COLORS.green, label: 'Score >= 90% (Excellent)' },
-    { color: COLORS.orangeBg, textColor: COLORS.orange, label: 'Score 75-89% (Needs Improvement)' },
-    { color: COLORS.redBg, textColor: COLORS.red, label: 'Score < 75% (Critical)' },
-  ]
-  for (const item of legendScores) {
-    doc.rect(40, y, 12, 10).fill(item.color)
-    doc.font('Helvetica').fontSize(7.5).fillColor(COLORS.darkText)
-      .text(item.label, 58, y + 1, { lineBreak: false })
-    y += 14
-  }
-
-  y += 6
-
-  // Duration key
-  const legendDuration = [
-    { color: COLORS.green, label: 'Duration <= 7 days (On Time)' },
-    { color: COLORS.orange, label: 'Duration 8-10 days (Delayed)' },
-    { color: COLORS.red, label: 'Duration > 10 days (Critical Delay)' },
-  ]
-  for (const item of legendDuration) {
-    doc.rect(40, y, 12, 10).fill(item.color)
-    doc.font('Helvetica').fontSize(7.5).fillColor(COLORS.darkText)
-      .text(item.label, 58, y + 1, { lineBreak: false })
-    y += 14
-  }
-
-  y += 6
-  doc.font('Helvetica').fontSize(7.5).fillColor(COLORS.mediumText)
-    .text('Yellow rows = Pending | Red rows = Below 85%', 40, y, { lineBreak: false })
+    <div style="display:flex;gap:16px;flex-wrap:wrap;font-size:7pt;color:#666;margin-top:6px;padding:8px;background:#f9f9f9;border-radius:4px">
+      <div style="display:flex;align-items:center;gap:4px"><div style="width:12px;height:10px;background:#E8F5E9;border-radius:2px"></div> Score ≥ 90%</div>
+      <div style="display:flex;align-items:center;gap:4px"><div style="width:12px;height:10px;background:#FFF3E0;border-radius:2px"></div> Score 75–89%</div>
+      <div style="display:flex;align-items:center;gap:4px"><div style="width:12px;height:10px;background:#FFEBEE;border-radius:2px"></div> Score &lt; 75%</div>
+      <div>Duration: ≤7d / 8–10d / &gt;10d</div>
+      <div>Yellow rows = Pending | Red rows = Below 85%</div>
+    </div>
+  </body></html>`
 }
 
 // ─── Main Export ────────────────────────────────────────────────────────────
 
 export async function generateReport(params: ReportParams): Promise<Buffer> {
   const { reportType, regions, contractors, years, months } = params
-  const governorateCodes = regions ?? []
-  const contractorCrs = contractors ?? []
-  const activeMonths = months ?? []
-
-  // Build date filter
+  const govCodes = regions ?? [], crCodes = contractors ?? [], activeMonths = months ?? []
   const startMonth = activeMonths.length ? String(Math.min(...activeMonths)).padStart(2, '0') : '01'
   const endMonth = activeMonths.length ? String(Math.max(...activeMonths)).padStart(2, '0') : '12'
-  const startYear = Math.min(...years)
-  const endYear = Math.max(...years)
 
-  // Query work orders
   const workOrders = await prisma.workOrder.findMany({
     where: {
-      ...(governorateCodes.length > 0 ? { governorateCode: { in: governorateCodes } } : {}),
-      ...(contractorCrs.length > 0 ? { contractorCr: { in: contractorCrs } } : {}),
-      allocationDate: {
-        gte: new Date(`${startYear}-${startMonth}-01`),
-        lte: new Date(`${endYear}-${endMonth}-31`),
-      },
+      ...(govCodes.length > 0 ? { governorateCode: { in: govCodes } } : {}),
+      ...(crCodes.length > 0 ? { contractorCr: { in: crCodes } } : {}),
+      allocationDate: { gte: new Date(`${Math.min(...years)}-${startMonth}-01`), lte: new Date(`${Math.max(...years)}-${endMonth}-31`) },
     },
     include: {
       contractor: true,
       assignedInspector: { include: { staffProfile: { select: { fullName: true } } } },
-      governorate: true,
-      inspection: { include: { responses: true } },
-      scoringWeights: true,
+      governorate: true, inspection: { include: { responses: true } }, scoringWeights: true,
     },
     orderBy: { allocationDate: 'desc' },
   }) as unknown as WorkOrderWithRelations[]
 
-  // Fetch governorate names for region labels
+  const checklistItems = await prisma.checklistItem.findMany({ where: { isActive: true }, select: { id: true, question: true, category: true } })
+  const checklistItemMap = new Map(checklistItems.map(ci => [ci.id, { question: ci.question, category: ci.category }]))
+
   let regionNames: string[] = []
-  if (governorateCodes.length > 0) {
-    const govs = await prisma.governorate.findMany({
-      where: { code: { in: governorateCodes } },
-      select: { nameEn: true },
-    })
-    regionNames = govs.map(g => g.nameEn)
-  }
+  if (govCodes.length > 0) { regionNames = (await prisma.governorate.findMany({ where: { code: { in: govCodes } }, select: { nameEn: true } })).map(g => g.nameEn) }
 
+  const logo = getLogoBase64()
   const isLandscape = reportType === 'contractor-performance'
-  const reportId = `RPT-${new Date().toISOString().split('T')[0].replace(/-/g, '')}-001`
-  const pageCounter = { value: 1 }
 
-  const doc = new PDFDocument({
-    size: 'A4',
-    layout: isLandscape ? 'landscape' : 'portrait',
-    margin: 40,
-    bufferPages: true,
-  })
+  const html = reportType === 'performance-summary'
+    ? generatePerformanceSummaryHTML(workOrders, regionNames, years, activeMonths, logo, checklistItemMap)
+    : generateContractorPerformanceHTML(workOrders, years, activeMonths, logo)
 
-  const chunks: Buffer[] = []
-  doc.on('data', (chunk: Buffer) => chunks.push(chunk))
-
-  const finished = new Promise<Buffer>((resolve, reject) => {
-    doc.on('end', () => resolve(Buffer.concat(chunks)))
-    doc.on('error', reject)
-  })
-
-  if (reportType === 'performance-summary') {
-    generatePerformanceSummary(doc, workOrders, regionNames, years, activeMonths, reportId, pageCounter)
-  } else {
-    generateContractorPerformance(doc, workOrders, years, activeMonths, reportId, pageCounter)
+  const browser = await puppeteer.launch({ headless: true, args: ['--no-sandbox', '--disable-setuid-sandbox'] })
+  try {
+    const page = await browser.newPage()
+    await page.setContent(html, { waitUntil: 'networkidle0' })
+    const pdfBuffer = await page.pdf({
+      format: 'A4',
+      landscape: isLandscape,
+      printBackground: true,
+      margin: { top: '12mm', bottom: '18mm', left: '10mm', right: '10mm' },
+      displayHeaderFooter: true,
+      headerTemplate: '<span></span>',
+      footerTemplate: `<div style="width:100%;font-size:7pt;color:#999;padding:0 12mm;display:flex;justify-content:space-between">
+        <span>NAMA Water Services — Compliance Inspection System | Report ID: RPT-${new Date().toISOString().split('T')[0].replace(/-/g, '')}-001</span>
+        <span>Page <span class="pageNumber"></span> of <span class="totalPages"></span> | © 2026 NAMA Water Services SAOC</span>
+      </div>`,
+    })
+    return Buffer.from(pdfBuffer)
+  } finally {
+    await browser.close()
   }
-
-  doc.end()
-  return finished
 }
