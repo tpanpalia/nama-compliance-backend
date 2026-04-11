@@ -100,6 +100,15 @@ BEGIN
         JOIN  work_orders   wo ON wo.work_order_id  = i.work_order_id
         WHERE i.status = 'SUBMITTED'
           AND wo.allocation_date BETWEEN p_from_date AND p_to_date
+      ),
+
+      'pending_reviews', (
+        SELECT jsonb_build_object(
+          'value', COUNT(*)
+        )
+        FROM work_orders wo
+        WHERE wo.status IN ('SUBMITTED', 'PENDING_INSPECTION', 'INSPECTION_IN_PROGRESS', 'OVERDUE')
+          AND wo.allocation_date BETWEEN p_from_date AND p_to_date
       )
     ),
 
@@ -190,6 +199,65 @@ BEGIN
       JOIN  work_orders wo ON wo.work_order_id = i.work_order_id
       WHERE i.status = 'SUBMITTED'
         AND wo.allocation_date BETWEEN p_from_date AND p_to_date
+    ),
+
+    -- ── Violation trends (non-compliant counts by category with trend) ──
+    'violation_trends', (
+      SELECT COALESCE(jsonb_agg(row_data), '[]'::jsonb)
+      FROM (
+        SELECT jsonb_build_object(
+          'category',  cur.cat,
+          'label',     CASE cur.cat
+                         WHEN 'HSE' THEN 'HSE Violations'
+                         WHEN 'TECHNICAL' THEN 'Technical Issues'
+                         WHEN 'PROCESS' THEN 'Process Delays'
+                         WHEN 'CLOSURE' THEN 'Documentation Gaps'
+                       END,
+          'count',     cur.nc_count,
+          'total',     cur.total_count,
+          'severity',  CASE
+                         WHEN cur.nc_count = 0 THEN 'low'
+                         WHEN cur.nc_pct >= 30 THEN 'high'
+                         WHEN cur.nc_pct >= 15 THEN 'medium'
+                         ELSE 'low'
+                       END,
+          'trend',     CASE
+                         WHEN prev.nc_count IS NULL OR prev.nc_count = cur.nc_count THEN 'stable'
+                         WHEN cur.nc_count < prev.nc_count THEN 'down'
+                         ELSE 'up'
+                       END
+        ) AS row_data
+        FROM (
+          SELECT
+            ci.category AS cat,
+            COUNT(*) FILTER (WHERE ir.rating = 'NON_COMPLIANT') AS nc_count,
+            COUNT(*) AS total_count,
+            ROUND(
+              (COUNT(*) FILTER (WHERE ir.rating = 'NON_COMPLIANT'))::numeric
+              / NULLIF(COUNT(*), 0) * 100, 1
+            ) AS nc_pct
+          FROM  inspection_responses ir
+          JOIN  checklist_items      ci ON ci.id = ir.checklist_item_id
+          JOIN  inspections          i  ON i.id  = ir.inspection_id
+          JOIN  work_orders          wo ON wo.work_order_id = i.work_order_id
+          WHERE i.status = 'SUBMITTED'
+            AND wo.allocation_date BETWEEN p_from_date AND p_to_date
+          GROUP BY ci.category
+        ) cur
+        LEFT JOIN (
+          SELECT
+            ci.category AS cat,
+            COUNT(*) FILTER (WHERE ir.rating = 'NON_COMPLIANT') AS nc_count
+          FROM  inspection_responses ir
+          JOIN  checklist_items      ci ON ci.id = ir.checklist_item_id
+          JOIN  inspections          i  ON i.id  = ir.inspection_id
+          JOIN  work_orders          wo ON wo.work_order_id = i.work_order_id
+          WHERE i.status = 'SUBMITTED'
+            AND wo.allocation_date BETWEEN (p_from_date - (p_to_date - p_from_date)) AND (p_from_date - 1)
+          GROUP BY ci.category
+        ) prev ON prev.cat = cur.cat
+        ORDER BY cur.nc_count DESC
+      ) agg
     ),
 
     -- ── Top 5 and Bottom 5 performers ────────────────────────
