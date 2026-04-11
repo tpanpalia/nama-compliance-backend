@@ -19,24 +19,72 @@ export const adminWorkOrderService = {
     inspectorId?: string
     governorateCode?: string
     search?: string
+    years?: string
+    months?: string
     page: number
     limit: number
   }) => {
     const skip  = (params.page - 1) * params.limit
-    const where: any = {
-      ...(params.status          ? { status: params.status as WorkOrderStatus }           : {}),
-      ...(params.contractorCr    ? { contractorCr: params.contractorCr }                  : {}),
-      ...(params.inspectorId     ? { assignedInspectorId: params.inspectorId }            : {}),
-      ...(params.governorateCode ? { governorateCode: params.governorateCode }            : {}),
-      ...(params.search ? {
+
+    // Build date filter from years + months
+    let dateFilter: any = undefined
+    const yearList = params.years ? params.years.split(',').map(Number).filter(y => y >= 2020 && y <= 2100) : []
+    const monthList = params.months ? params.months.split(',').map(Number).filter(m => m >= 1 && m <= 12) : []
+
+    if (yearList.length > 0 && monthList.length > 0) {
+      // Specific months in specific years
+      const conditions: any[] = []
+      for (const y of yearList) {
+        for (const m of monthList) {
+          const start = new Date(y, m - 1, 1)
+          const end = new Date(y, m, 0)
+          conditions.push({ allocationDate: { gte: start, lte: end } })
+        }
+      }
+      dateFilter = conditions.length === 1 ? conditions[0] : { OR: conditions }
+    } else if (yearList.length > 0) {
+      // Full years only
+      const minYear = Math.min(...yearList)
+      const maxYear = Math.max(...yearList)
+      dateFilter = { allocationDate: { gte: new Date(`${minYear}-01-01`), lte: new Date(`${maxYear}-12-31`) } }
+    } else if (monthList.length > 0) {
+      // Months only (all years) — get the range of years that have data
+      const earliest = await prisma.workOrder.findFirst({ orderBy: { allocationDate: 'asc' }, select: { allocationDate: true } })
+      const latest = await prisma.workOrder.findFirst({ orderBy: { allocationDate: 'desc' }, select: { allocationDate: true } })
+      if (earliest && latest) {
+        const startY = earliest.allocationDate.getFullYear()
+        const endY = latest.allocationDate.getFullYear()
+        const conditions: any[] = []
+        for (let y = startY; y <= endY; y++) {
+          for (const m of monthList) {
+            const start = new Date(y, m - 1, 1)
+            const end = new Date(y, m, 0)
+            conditions.push({ allocationDate: { gte: start, lte: end } })
+          }
+        }
+        dateFilter = conditions.length === 1 ? conditions[0] : { OR: conditions }
+      }
+    }
+
+    // Use AND to combine filters that might each have OR clauses
+    const andConditions: any[] = []
+    if (params.status) andConditions.push({ status: params.status as WorkOrderStatus })
+    if (params.contractorCr) andConditions.push({ contractorCr: params.contractorCr })
+    if (params.inspectorId) andConditions.push({ assignedInspectorId: params.inspectorId })
+    if (params.governorateCode) andConditions.push({ governorateCode: params.governorateCode })
+    if (dateFilter) andConditions.push(dateFilter)
+    if (params.search) {
+      andConditions.push({
         OR: [
           { id: { contains: params.search, mode: 'insensitive' } },
           { contractorCr: { contains: params.search, mode: 'insensitive' } },
           { contractor: { companyName: { contains: params.search, mode: 'insensitive' } } },
           { assignedInspector: { staffProfile: { fullName: { contains: params.search, mode: 'insensitive' } } } },
         ],
-      } : {}),
+      })
     }
+
+    const where: any = andConditions.length > 0 ? { AND: andConditions } : {}
 
     const [items, total] = await Promise.all([
       workOrderRepository.findMany({ where, skip, take: params.limit }),

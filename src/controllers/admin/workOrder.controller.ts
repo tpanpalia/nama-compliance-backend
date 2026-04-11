@@ -31,6 +31,8 @@ export const list = async (req: Request, res: Response, next: NextFunction) => {
       inspectorId:     qs(req.query.inspectorId),
       governorateCode: qs(req.query.governorateCode),
       search:          qs(req.query.search),
+      years:           qs(req.query.years),
+      months:          qs(req.query.months),
       page:            parseInt(qsDefault(req.query.page,  '1'),  10),
       limit:           parseInt(qsDefault(req.query.limit, '20'), 10),
     })
