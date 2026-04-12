@@ -1,7 +1,8 @@
 import { prisma } from '../../lib/prisma'
 import path from 'path'
 import fs from 'fs'
-import puppeteer from 'puppeteer'
+import puppeteerCore from 'puppeteer-core'
+import chromium from '@sparticuz/chromium'
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -448,7 +449,20 @@ export async function generateReport(params: ReportParams): Promise<Buffer> {
     ? generatePerformanceSummaryHTML(workOrders, regionNames, years, activeMonths, logo, checklistItemMap)
     : generateContractorPerformanceHTML(workOrders, years, activeMonths, logo)
 
-  const browser = await puppeteer.launch({ headless: true, args: ['--no-sandbox', '--disable-setuid-sandbox'] })
+  // Use @sparticuz/chromium for serverless (Vercel), fall back to local Chrome for dev
+  const isServerless = !!process.env.AWS_LAMBDA_FUNCTION_NAME || !!process.env.VERCEL
+  const browser = await puppeteerCore.launch({
+    args: isServerless ? chromium.args : ['--no-sandbox', '--disable-setuid-sandbox'],
+    defaultViewport: { width: 1280, height: 720 },
+    executablePath: isServerless
+      ? await chromium.executablePath()
+      : process.platform === 'darwin'
+        ? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
+        : process.platform === 'win32'
+          ? 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe'
+          : '/usr/bin/google-chrome',
+    headless: true,
+  })
   try {
     const page = await browser.newPage()
     await page.setContent(html, { waitUntil: 'networkidle0' })
