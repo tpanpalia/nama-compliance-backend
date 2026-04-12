@@ -94,7 +94,6 @@ BEGIN
       WHERE wo.contractor_cr   = p_cr_number
         AND i.status           = 'SUBMITTED'
         AND i.final_score      IS NOT NULL
-        AND wo.allocation_date BETWEEN v_from_date AND v_to_date
     ),
 
     -- ── Monthly trend (last 12 months, fixed rolling window) ──
@@ -150,7 +149,6 @@ BEGIN
         LEFT  JOIN inspections i ON i.work_order_id  = wo.work_order_id
                                 AND i.status = 'SUBMITTED'
         WHERE wo.contractor_cr   = p_cr_number
-          AND wo.allocation_date BETWEEN v_from_date AND v_to_date
         ORDER BY wo.allocation_date DESC
       ) sub
     )
