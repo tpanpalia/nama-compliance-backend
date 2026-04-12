@@ -46,7 +46,7 @@ BEGIN
               'ASSIGNED','IN_PROGRESS','SUBMITTED',
               'PENDING_INSPECTION','INSPECTION_IN_PROGRESS','OVERDUE'
             )) AS active,
-          ROUND(AVG(i.final_score)::numeric, 1) AS avg_score
+          ROUND(AVG(i.final_score)::numeric, 2) AS avg_score
         FROM work_orders wo
         LEFT JOIN inspections i
           ON i.work_order_id = wo.work_order_id
