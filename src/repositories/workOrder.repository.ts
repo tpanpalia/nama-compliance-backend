@@ -32,16 +32,17 @@ export const workOrderRepository = {
       include: {
         contractor:  true,
         governorate: true,
+        assignedInspector: { include: { staffProfile: true } },
         inspection: {
           include: {
             responses: {
               include: { checklistItem: true },
               orderBy:  [{ checklistItem: { category: 'asc' } }, { checklistItem: { order: 'asc' } }],
             },
+            evidence: { include: { file: true } },
           },
         },
         evidence: {
-          where:   { uploadedByRole: 'CONTRACTOR' },
           include: { file: true, checklistItem: true },
         },
       },
@@ -77,7 +78,7 @@ export const workOrderRepository = {
         contractor:        { select: { companyName: true } },
         assignedInspector: { select: { staffProfile: { select: { fullName: true } } } },
         governorate:       true,
-        inspection:        { select: { finalScore: true, complianceRating: true, status: true } },
+        inspection:        { select: { finalScore: true, complianceRating: true, status: true, submittedAt: true } },
       },
       orderBy: { createdAt: 'desc' },
       skip:    params.skip,

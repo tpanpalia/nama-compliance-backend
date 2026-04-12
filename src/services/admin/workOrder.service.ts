@@ -18,16 +18,73 @@ export const adminWorkOrderService = {
     contractorCr?: string
     inspectorId?: string
     governorateCode?: string
+    search?: string
+    years?: string
+    months?: string
     page: number
     limit: number
   }) => {
     const skip  = (params.page - 1) * params.limit
-    const where = {
-      ...(params.status          ? { status: params.status as WorkOrderStatus }           : {}),
-      ...(params.contractorCr    ? { contractorCr: params.contractorCr }                  : {}),
-      ...(params.inspectorId     ? { assignedInspectorId: params.inspectorId }            : {}),
-      ...(params.governorateCode ? { governorateCode: params.governorateCode }            : {}),
+
+    // Build date filter from years + months
+    let dateFilter: any = undefined
+    const yearList = params.years ? params.years.split(',').map(Number).filter(y => y >= 2020 && y <= 2100) : []
+    const monthList = params.months ? params.months.split(',').map(Number).filter(m => m >= 1 && m <= 12) : []
+
+    if (yearList.length > 0 && monthList.length > 0) {
+      // Specific months in specific years
+      const conditions: any[] = []
+      for (const y of yearList) {
+        for (const m of monthList) {
+          const start = new Date(y, m - 1, 1)
+          const end = new Date(y, m, 0)
+          conditions.push({ allocationDate: { gte: start, lte: end } })
+        }
+      }
+      dateFilter = conditions.length === 1 ? conditions[0] : { OR: conditions }
+    } else if (yearList.length > 0) {
+      // Full years only
+      const minYear = Math.min(...yearList)
+      const maxYear = Math.max(...yearList)
+      dateFilter = { allocationDate: { gte: new Date(`${minYear}-01-01`), lte: new Date(`${maxYear}-12-31`) } }
+    } else if (monthList.length > 0) {
+      // Months only (all years) — get the range of years that have data
+      const earliest = await prisma.workOrder.findFirst({ orderBy: { allocationDate: 'asc' }, select: { allocationDate: true } })
+      const latest = await prisma.workOrder.findFirst({ orderBy: { allocationDate: 'desc' }, select: { allocationDate: true } })
+      if (earliest && latest) {
+        const startY = earliest.allocationDate.getFullYear()
+        const endY = latest.allocationDate.getFullYear()
+        const conditions: any[] = []
+        for (let y = startY; y <= endY; y++) {
+          for (const m of monthList) {
+            const start = new Date(y, m - 1, 1)
+            const end = new Date(y, m, 0)
+            conditions.push({ allocationDate: { gte: start, lte: end } })
+          }
+        }
+        dateFilter = conditions.length === 1 ? conditions[0] : { OR: conditions }
+      }
     }
+
+    // Use AND to combine filters that might each have OR clauses
+    const andConditions: any[] = []
+    if (params.status) andConditions.push({ status: params.status as WorkOrderStatus })
+    if (params.contractorCr) andConditions.push({ contractorCr: params.contractorCr })
+    if (params.inspectorId) andConditions.push({ assignedInspectorId: params.inspectorId })
+    if (params.governorateCode) andConditions.push({ governorateCode: params.governorateCode })
+    if (dateFilter) andConditions.push(dateFilter)
+    if (params.search) {
+      andConditions.push({
+        OR: [
+          { id: { contains: params.search, mode: 'insensitive' } },
+          { contractorCr: { contains: params.search, mode: 'insensitive' } },
+          { contractor: { companyName: { contains: params.search, mode: 'insensitive' } } },
+          { assignedInspector: { staffProfile: { fullName: { contains: params.search, mode: 'insensitive' } } } },
+        ],
+      })
+    }
+
+    const where: any = andConditions.length > 0 ? { AND: andConditions } : {}
 
     const [items, total] = await Promise.all([
       workOrderRepository.findMany({ where, skip, take: params.limit }),
@@ -44,30 +101,23 @@ export const adminWorkOrderService = {
   },
 
   create: async (performedBy: string, data: {
-    contractorCr: string
     governorateCode: string
     siteName: string
     description?: string
     priority: WorkOrderPriority
     allocationDate: string
     targetCompletionDate: string
-    assignedInspectorId?: string
   }) => {
-    const contractor = await contractorRepository.findByCr(data.contractorCr)
-    if (!contractor) throw new AppError(404, 'Contractor not found')
-
     const gov = await governorateRepository.findByCode(data.governorateCode)
     if (!gov) throw new AppError(404, 'Governorate not found')
 
     const weights = await scoringRepository.findActive()
     if (!weights) throw new AppError(500, 'No active scoring weights found')
 
-    const id     = await generateWorkOrderId()
-    const status: WorkOrderStatus = data.assignedInspectorId ? 'ASSIGNED' : 'UNASSIGNED'
+    const id = await generateWorkOrderId()
 
     const workOrder = await workOrderRepository.create({
       id,
-      contractorCr:         data.contractorCr,
       governorateCode:      data.governorateCode,
       siteName:             data.siteName,
       description:          data.description,
@@ -75,8 +125,7 @@ export const adminWorkOrderService = {
       allocationDate:       new Date(data.allocationDate),
       targetCompletionDate: new Date(data.targetCompletionDate),
       scoringWeightsId:     weights.id,
-      status,
-      assignedInspectorId:  data.assignedInspectorId,
+      status:               'UNASSIGNED',
     })
 
     await auditLogRepository.create({
@@ -84,20 +133,84 @@ export const adminWorkOrderService = {
       entityType: 'WORK_ORDER',
       entityId:   id,
       action:     'CREATED',
-      metadata:   { contractorCr: data.contractorCr, status },
+      metadata:   { status: 'UNASSIGNED' },
     })
 
-    if (data.assignedInspectorId) {
-      await notificationRepository.create({
-        userId:      data.assignedInspectorId,
-        type:        'WORK_ORDER_ASSIGNED',
-        title:       'New Work Order Assigned',
-        message:     `Work order ${id} has been assigned to you.`,
-        workOrderId: id,
-      })
+    return workOrder
+  },
+
+  bulkCreate: async (performedBy: string, workOrders: {
+    governorateCode: string
+    siteName: string
+    description?: string
+    workType?: string
+    priority: WorkOrderPriority
+    allocationDate: string
+    targetCompletionDate: string
+  }[]) => {
+    // Validate all governorates upfront
+    const govCodes = [...new Set(workOrders.map((wo) => wo.governorateCode))]
+    for (const code of govCodes) {
+      const gov = await governorateRepository.findByCode(code)
+      if (!gov) throw new AppError(400, `Governorate not found: ${code}`)
     }
 
-    return workOrder
+    const weights = await scoringRepository.findActive()
+    if (!weights) throw new AppError(500, 'No active scoring weights found')
+
+    // Pre-generate all IDs sequentially to avoid conflicts
+    const ids: string[] = []
+    const today = new Date()
+    const datePart = today.toISOString().slice(0, 10).replace(/-/g, '')
+    const prefix = `WO-${datePart}-`
+    const last = await prisma.workOrder.findFirst({
+      where: { id: { startsWith: prefix } },
+      orderBy: { id: 'desc' },
+      select: { id: true },
+    })
+    let seq = 1
+    if (last) {
+      const parts = last.id.split('-')
+      seq = parseInt(parts[parts.length - 1], 10) + 1
+    }
+    for (let i = 0; i < workOrders.length; i++) {
+      ids.push(`${prefix}${String(seq + i).padStart(4, '0')}`)
+    }
+
+    // Wrap all creates in a single transaction
+    const results = await prisma.$transaction(async (tx) => {
+      const created = []
+      for (let i = 0; i < workOrders.length; i++) {
+        const data = workOrders[i]
+        const id = ids[i]
+        const workOrder = await tx.workOrder.create({
+          data: {
+            id,
+            governorateCode:      data.governorateCode,
+            siteName:             data.siteName,
+            description:          data.description,
+            priority:             data.priority,
+            allocationDate:       new Date(data.allocationDate),
+            targetCompletionDate: new Date(data.targetCompletionDate),
+            scoringWeightsId:     weights.id,
+            status:               'UNASSIGNED',
+          },
+        })
+        await tx.auditLog.create({
+          data: {
+            performedBy,
+            entityType: 'WORK_ORDER',
+            entityId:   id,
+            action:     'CREATED',
+            metadata:   { status: 'UNASSIGNED', bulkImport: true },
+          },
+        })
+        created.push(workOrder)
+      }
+      return created
+    })
+
+    return results
   },
 
   assign: async (performedBy: string, workOrderId: string, inspectorId: string) => {
@@ -174,12 +287,26 @@ export const adminWorkOrderService = {
     description?: string
     priority?: WorkOrderPriority
     targetCompletionDate?: string
+    contractorCr?: string
   }) => {
     const wo = await workOrderRepository.findById(workOrderId)
     if (!wo) throw new AppError(404, 'Work order not found')
 
+    if (data.contractorCr) {
+      const allowedForReassign: WorkOrderStatus[] = ['UNASSIGNED', 'ASSIGNED']
+      if (!allowedForReassign.includes(wo.status)) {
+        throw new AppError(400, `Cannot assign/reassign contractor when work order is ${wo.status}`)
+      }
+      const contractor = await contractorRepository.findByCr(data.contractorCr)
+      if (!contractor) throw new AppError(404, 'Contractor not found')
+    }
+
+    // When assigning contractor to UNASSIGNED WO, change status to ASSIGNED
+    const statusUpdate = data.contractorCr && wo.status === 'UNASSIGNED' ? { status: 'ASSIGNED' as WorkOrderStatus } : {}
+
     const updated = await workOrderRepository.update(workOrderId, {
       ...data,
+      ...statusUpdate,
       ...(data.targetCompletionDate ? { targetCompletionDate: new Date(data.targetCompletionDate) } : {}),
     })
 
@@ -187,9 +314,47 @@ export const adminWorkOrderService = {
       performedBy,
       entityType: 'WORK_ORDER',
       entityId:   workOrderId,
-      action:     'UPDATED',
-      metadata:   data,
+      action:     data.contractorCr ? 'REASSIGNED' : 'UPDATED',
+      metadata:   { ...data, previousContractorCr: data.contractorCr ? wo.contractorCr : undefined },
     })
+
+    return updated
+  },
+
+  reopen: async (performedBy: string, workOrderId: string, reason: string) => {
+    const wo = await workOrderRepository.findById(workOrderId)
+    if (!wo) throw new AppError(404, 'Work order not found')
+
+    const allowedStatuses: WorkOrderStatus[] = ['SUBMITTED', 'PENDING_INSPECTION']
+    if (!allowedStatuses.includes(wo.status)) {
+      throw new AppError(400, `Cannot reopen work order when status is ${wo.status}`)
+    }
+
+    const updated = await workOrderRepository.update(workOrderId, {
+      status: 'IN_PROGRESS' as WorkOrderStatus,
+    })
+
+    await auditLogRepository.create({
+      performedBy,
+      entityType: 'WORK_ORDER',
+      entityId:   workOrderId,
+      action:     'REOPENED',
+      metadata:   { previousStatus: wo.status, reason },
+    })
+
+    // Notify the contractor if one is assigned
+    if (wo.contractorCr) {
+      const contractor = await contractorRepository.findByCr(wo.contractorCr)
+      if (contractor?.userId) {
+        await notificationRepository.create({
+          userId:      contractor.userId,
+          type:        'WORK_ORDER_ASSIGNED',
+          title:       'Work Order Reopened',
+          message:     `Work order ${workOrderId} has been reopened${reason ? `: ${reason}` : '.'}`,
+          workOrderId,
+        })
+      }
+    }
 
     return updated
   },

@@ -27,6 +27,13 @@ export const getById = async (req: Request, res: Response, next: NextFunction) =
   } catch (err) { next(err) }
 }
 
+export const getSummary = async (_req: Request, res: Response, next: NextFunction) => {
+  try {
+    const result = await regulatorContractorService.getSummary()
+    res.json(result)
+  } catch (err) { next(err) }
+}
+
 export const getPerformance = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { year, month } = perfQuerySchema.parse(req.query)

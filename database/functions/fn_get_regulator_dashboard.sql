@@ -34,7 +34,7 @@ BEGIN
     'kpis', jsonb_build_object(
 
       'total_contractors', jsonb_build_object(
-        'value',    (SELECT COUNT(*) FROM users WHERE role = 'CONTRACTOR'),
+        'value',    (SELECT COUNT(*) FROM users WHERE role = 'CONTRACTOR' AND status = 'ACTIVE'),
         'active',   (SELECT COUNT(*) FROM users WHERE role = 'CONTRACTOR' AND status = 'ACTIVE'),
         'pending',  (SELECT COUNT(*) FROM users WHERE role = 'CONTRACTOR' AND status = 'PENDING'),
         'suspended',(SELECT COUNT(*) FROM users WHERE role = 'CONTRACTOR' AND status = 'SUSPENDED'),
@@ -65,7 +65,7 @@ BEGIN
 
       'avg_compliance', (
         WITH curr AS (
-          SELECT ROUND(AVG(i.final_score)::numeric, 1) AS v
+          SELECT ROUND(AVG(i.final_score)::numeric, 2) AS v
           FROM   inspections i
           JOIN   work_orders wo ON wo.work_order_id = i.work_order_id
           WHERE  i.status = 'SUBMITTED'
@@ -73,7 +73,7 @@ BEGIN
             AND  wo.allocation_date BETWEEN p_from_date AND p_to_date
         ),
         prev AS (
-          SELECT ROUND(AVG(i.final_score)::numeric, 1) AS v
+          SELECT ROUND(AVG(i.final_score)::numeric, 2) AS v
           FROM   inspections i
           JOIN   work_orders wo ON wo.work_order_id = i.work_order_id
           WHERE  i.status = 'SUBMITTED'
@@ -82,7 +82,7 @@ BEGIN
         )
         SELECT jsonb_build_object(
           'value',     curr.v,
-          'trend_pts', ROUND(COALESCE(curr.v, 0) - COALESCE(prev.v, 0), 1)
+          'trend_pts', ROUND(COALESCE(curr.v, 0) - COALESCE(prev.v, 0), 2)
         )
         FROM curr, prev
       ),
@@ -100,6 +100,15 @@ BEGIN
         JOIN  work_orders   wo ON wo.work_order_id  = i.work_order_id
         WHERE i.status = 'SUBMITTED'
           AND wo.allocation_date BETWEEN p_from_date AND p_to_date
+      ),
+
+      'pending_reviews', (
+        SELECT jsonb_build_object(
+          'value', COUNT(*)
+        )
+        FROM work_orders wo
+        WHERE wo.status IN ('SUBMITTED', 'PENDING_INSPECTION', 'INSPECTION_IN_PROGRESS', 'OVERDUE')
+          AND wo.allocation_date BETWEEN p_from_date AND p_to_date
       )
     ),
 
@@ -112,11 +121,11 @@ BEGIN
           jsonb_build_object(
             'month',       TO_CHAR(ms.month_start, 'YYYY-MM'),
             'month_label', TO_CHAR(ms.month_start, 'Mon YYYY'),
-            'overall',     ROUND(AVG(i.final_score)::numeric,       1),
-            'hse',         ROUND(AVG(i.hse_score)::numeric,         1),
-            'technical',   ROUND(AVG(i.technical_score)::numeric,   1),
-            'process',     ROUND(AVG(i.process_score)::numeric,     1),
-            'closure',     ROUND(AVG(i.closure_score)::numeric,     1)
+            'overall',     ROUND(AVG(i.final_score)::numeric,       2),
+            'hse',         ROUND(AVG(i.hse_score)::numeric,         2),
+            'technical',   ROUND(AVG(i.technical_score)::numeric,   2),
+            'process',     ROUND(AVG(i.process_score)::numeric,     2),
+            'closure',     ROUND(AVG(i.closure_score)::numeric,     2)
           ) AS row_data
         FROM (
           SELECT generate_series(
@@ -134,62 +143,91 @@ BEGIN
       ) sub
     ),
 
-    -- ── Compliance distribution — one score per contractor ────
-    -- Uses the contractor's latest inspection score in the period.
+    -- ── Compliance distribution — uses cached avg_score from contractor_profiles ──
     'compliance_distribution', (
       SELECT jsonb_build_object(
-        'excellent', COUNT(*) FILTER (WHERE final_score >= 90),
-        'good',      COUNT(*) FILTER (WHERE final_score >= 80 AND final_score < 90),
-        'fair',      COUNT(*) FILTER (WHERE final_score >= 70 AND final_score < 80),
-        'poor',      COUNT(*) FILTER (WHERE final_score < 70)
+        'excellent', COUNT(*) FILTER (WHERE cp.avg_score >= 90),
+        'good',      COUNT(*) FILTER (WHERE cp.avg_score >= 80 AND cp.avg_score < 90),
+        'fair',      COUNT(*) FILTER (WHERE cp.avg_score >= 70 AND cp.avg_score < 80),
+        'poor',      COUNT(*) FILTER (WHERE cp.avg_score < 70)
       )
-      FROM (
-        SELECT DISTINCT ON (wo.contractor_cr)
-          i.final_score
-        FROM  inspections   i
-        JOIN  work_orders   wo ON wo.work_order_id = i.work_order_id
-        WHERE i.status = 'SUBMITTED'
-          AND i.final_score IS NOT NULL
-          AND wo.allocation_date BETWEEN p_from_date AND p_to_date
-        ORDER BY wo.contractor_cr, i.submitted_at DESC
-      ) latest
-    ),
-
-    -- ── Regional performance (all governorates) ───────────────
-    'regional_performance', (
-      SELECT COALESCE(jsonb_agg(row_data ORDER BY avg_score DESC NULLS LAST), '[]'::jsonb)
-      FROM (
-        SELECT
-          jsonb_build_object(
-            'governorate_code',   g.code,
-            'governorate_name',   g.name_en,
-            'active_contractors', COUNT(DISTINCT wo.contractor_cr),
-            'total_inspections',  COUNT(i.id),
-            'avg_score',          ROUND(AVG(i.final_score)::numeric, 1),
-            'latest_inspection',  MAX(i.submitted_at)
-          ) AS row_data,
-          AVG(i.final_score) AS avg_score
-        FROM  governorates   g
-        LEFT  JOIN work_orders   wo ON wo.governorate_code = g.code
-                AND wo.allocation_date BETWEEN p_from_date AND p_to_date
-        LEFT  JOIN inspections   i  ON i.work_order_id     = wo.work_order_id
-                AND i.status = 'SUBMITTED'
-        GROUP BY g.code, g.name_en
-      ) sub
+      FROM contractor_profiles cp
+      JOIN users u ON u.id = cp.user_id
+      WHERE u.status != 'INACTIVE'
+        AND cp.avg_score IS NOT NULL
     ),
 
     -- ── Category performance (period-filtered) ────────────────
     'category_performance', (
       SELECT jsonb_build_object(
-        'hse',       ROUND(AVG(i.hse_score)::numeric,       1),
-        'technical', ROUND(AVG(i.technical_score)::numeric, 1),
-        'process',   ROUND(AVG(i.process_score)::numeric,   1),
-        'closure',   ROUND(AVG(i.closure_score)::numeric,   1)
+        'hse',       ROUND(AVG(i.hse_score)::numeric,       2),
+        'technical', ROUND(AVG(i.technical_score)::numeric, 2),
+        'process',   ROUND(AVG(i.process_score)::numeric,   2),
+        'closure',   ROUND(AVG(i.closure_score)::numeric,   2)
       )
       FROM  inspections i
       JOIN  work_orders wo ON wo.work_order_id = i.work_order_id
       WHERE i.status = 'SUBMITTED'
         AND wo.allocation_date BETWEEN p_from_date AND p_to_date
+    ),
+
+    -- ── Violation trends (non-compliant counts by category with trend) ──
+    'violation_trends', (
+      SELECT COALESCE(jsonb_agg(row_data), '[]'::jsonb)
+      FROM (
+        SELECT jsonb_build_object(
+          'category',  cur.cat,
+          'label',     CASE cur.cat
+                         WHEN 'HSE' THEN 'HSE Violations'
+                         WHEN 'TECHNICAL' THEN 'Technical Issues'
+                         WHEN 'PROCESS' THEN 'Process Delays'
+                         WHEN 'CLOSURE' THEN 'Documentation Gaps'
+                       END,
+          'count',     cur.nc_count,
+          'total',     cur.total_count,
+          'severity',  CASE
+                         WHEN cur.nc_count = 0 THEN 'low'
+                         WHEN cur.nc_pct >= 30 THEN 'high'
+                         WHEN cur.nc_pct >= 15 THEN 'medium'
+                         ELSE 'low'
+                       END,
+          'trend',     CASE
+                         WHEN prev.nc_count IS NULL OR prev.nc_count = cur.nc_count THEN 'stable'
+                         WHEN cur.nc_count < prev.nc_count THEN 'down'
+                         ELSE 'up'
+                       END
+        ) AS row_data
+        FROM (
+          SELECT
+            ci.category AS cat,
+            COUNT(*) FILTER (WHERE ir.rating = 'NON_COMPLIANT') AS nc_count,
+            COUNT(*) AS total_count,
+            ROUND(
+              (COUNT(*) FILTER (WHERE ir.rating = 'NON_COMPLIANT'))::numeric
+              / NULLIF(COUNT(*), 0) * 100, 1
+            ) AS nc_pct
+          FROM  inspection_responses ir
+          JOIN  checklist_items      ci ON ci.id = ir.checklist_item_id
+          JOIN  inspections          i  ON i.id  = ir.inspection_id
+          JOIN  work_orders          wo ON wo.work_order_id = i.work_order_id
+          WHERE i.status = 'SUBMITTED'
+            AND wo.allocation_date BETWEEN p_from_date AND p_to_date
+          GROUP BY ci.category
+        ) cur
+        LEFT JOIN (
+          SELECT
+            ci.category AS cat,
+            COUNT(*) FILTER (WHERE ir.rating = 'NON_COMPLIANT') AS nc_count
+          FROM  inspection_responses ir
+          JOIN  checklist_items      ci ON ci.id = ir.checklist_item_id
+          JOIN  inspections          i  ON i.id  = ir.inspection_id
+          JOIN  work_orders          wo ON wo.work_order_id = i.work_order_id
+          WHERE i.status = 'SUBMITTED'
+            AND wo.allocation_date BETWEEN (p_from_date - (p_to_date - p_from_date)) AND (p_from_date - 1)
+          GROUP BY ci.category
+        ) prev ON prev.cat = cur.cat
+        ORDER BY cur.nc_count DESC
+      ) agg
     ),
 
     -- ── Top 5 and Bottom 5 performers ────────────────────────
@@ -199,17 +237,14 @@ BEGIN
         SELECT jsonb_build_object(
           'cr_number',    cp.cr_number,
           'company_name', cp.company_name,
-          'avg_score',    ROUND(AVG(i.final_score)::numeric, 1),
-          'projects',     COUNT(DISTINCT wo.work_order_id)
+          'avg_score',    cp.avg_score,
+          'projects',     cp.total_inspections
         ) AS row_data
         FROM  contractor_profiles cp
-        JOIN  work_orders         wo ON wo.contractor_cr   = cp.cr_number
-        JOIN  inspections         i  ON i.work_order_id    = wo.work_order_id
-        WHERE i.status = 'SUBMITTED'
-          AND i.final_score IS NOT NULL
-          AND wo.allocation_date BETWEEN p_from_date AND p_to_date
-        GROUP BY cp.cr_number, cp.company_name
-        ORDER BY AVG(i.final_score) DESC NULLS LAST
+        JOIN  users u ON u.id = cp.user_id
+        WHERE u.status != 'INACTIVE'
+          AND cp.avg_score IS NOT NULL
+        ORDER BY cp.avg_score DESC
         LIMIT 5
       ) sub
     ),
@@ -220,17 +255,14 @@ BEGIN
         SELECT jsonb_build_object(
           'cr_number',    cp.cr_number,
           'company_name', cp.company_name,
-          'avg_score',    ROUND(AVG(i.final_score)::numeric, 1),
-          'projects',     COUNT(DISTINCT wo.work_order_id)
+          'avg_score',    cp.avg_score,
+          'projects',     cp.total_inspections
         ) AS row_data
         FROM  contractor_profiles cp
-        JOIN  work_orders         wo ON wo.contractor_cr   = cp.cr_number
-        JOIN  inspections         i  ON i.work_order_id    = wo.work_order_id
-        WHERE i.status = 'SUBMITTED'
-          AND i.final_score IS NOT NULL
-          AND wo.allocation_date BETWEEN p_from_date AND p_to_date
-        GROUP BY cp.cr_number, cp.company_name
-        ORDER BY AVG(i.final_score) ASC NULLS LAST
+        JOIN  users u ON u.id = cp.user_id
+        WHERE u.status != 'INACTIVE'
+          AND cp.avg_score IS NOT NULL
+        ORDER BY cp.avg_score ASC
         LIMIT 5
       ) sub
     ),

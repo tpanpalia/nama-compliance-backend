@@ -4,6 +4,7 @@ import { requireRole } from '../../middleware/requireRole'
 import workOrdersRouter  from './workOrders'
 import inspectionsRouter from './inspections'
 import evidenceRouter    from './evidence'
+import contractorsRouter from './contractors'
 
 const router = Router()
 
@@ -13,5 +14,6 @@ router.use(requireRole('INSPECTOR'))
 router.use('/work-orders',  workOrdersRouter)
 router.use('/inspections',  inspectionsRouter)
 router.use('/evidence',     evidenceRouter)
+router.use('/contractors',  contractorsRouter)
 
 export default router

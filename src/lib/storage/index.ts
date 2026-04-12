@@ -19,8 +19,14 @@ export interface StorageService {
   /** Generate a short-lived signed URL to read a private file */
   presignRead(s3Key: string, expiresInSeconds?: number): Promise<string>
 
+  /** Generate a short-lived signed URL to read a thumbnail version */
+  presignReadThumb(s3Key: string, expiresInSeconds?: number): Promise<string>
+
   /** Delete a file from storage */
   delete(s3Key: string): Promise<void>
+
+  /** Upload a buffer directly to storage */
+  upload(s3Key: string, buffer: Buffer, mimeType: string): Promise<void>
 
   /** Build the permanent storage key for a file */
   buildKey(category: string, fileId: string, filename: string): string

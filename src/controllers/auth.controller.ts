@@ -33,6 +33,10 @@ const changePasswordSchema = z.object({
   newPassword:     z.string().min(8),
 })
 
+const forgotPasswordSchema = z.object({ email: z.string().email() })
+const verifyOtpSchema = z.object({ email: z.string().email(), otp: z.string().length(6) })
+const resetPasswordSchema = z.object({ email: z.string().email(), otp: z.string().length(6), newPassword: z.string().min(8) })
+
 export const login = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { email, password } = loginSchema.parse(req.body)
@@ -76,6 +80,30 @@ export const changePassword = async (req: Request, res: Response, next: NextFunc
   try {
     const { currentPassword, newPassword } = changePasswordSchema.parse(req.body)
     const result = await authService.changePassword(req.user!.userId, currentPassword, newPassword)
+    res.json(result)
+  } catch (err) { next(err) }
+}
+
+export const forgotPassword = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { email } = forgotPasswordSchema.parse(req.body)
+    const result = await authService.forgotPassword(email)
+    res.json(result)
+  } catch (err) { next(err) }
+}
+
+export const verifyOtp = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const data = verifyOtpSchema.parse(req.body)
+    const result = await authService.verifyOtp(data.email, data.otp)
+    res.json(result)
+  } catch (err) { next(err) }
+}
+
+export const resetPassword = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const data = resetPasswordSchema.parse(req.body)
+    const result = await authService.resetPassword(data.email, data.otp, data.newPassword)
     res.json(result)
   } catch (err) { next(err) }
 }

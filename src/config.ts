@@ -22,7 +22,7 @@ export const config = {
 
   db: {
     url: required('DATABASE_URL'),
-    directUrl: required('DIRECT_URL'),
+    directUrl: optional('DIRECT_URL'),
   },
 
   jwt: {
@@ -45,5 +45,9 @@ export const config = {
       secretAccessKey: optional('AWS_SECRET_ACCESS_KEY'),
       bucket: optional('AWS_S3_BUCKET'),
     },
+  },
+  resend: {
+    apiKey: optional('RESEND_API_KEY', ''),
+    fromEmail: optional('RESEND_FROM_EMAIL', 'noreply@nama.om'),
   },
 } as const

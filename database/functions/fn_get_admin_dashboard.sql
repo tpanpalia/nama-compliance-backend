@@ -18,11 +18,14 @@ RETURNS jsonb
 LANGUAGE plpgsql
 STABLE
 AS $$
+
 DECLARE
   v_from_date  date;
   v_to_date    date;
   v_prev_from  date;
   v_prev_to    date;
+  v_trend_from date;
+  v_trend_to   date;
 BEGIN
 
   -- ── Date range for current period ────────────────────────
@@ -36,6 +39,14 @@ BEGIN
     v_to_date   := (make_date(p_year, p_month, 1) + interval '1 month - 1 day')::date;
     v_prev_from := (v_from_date - interval '1 month')::date;
     v_prev_to   := v_from_date - 1;
+  END IF;
+
+  IF p_month = 0 THEN
+    v_trend_from := make_date(p_year, 1, 1);
+    v_trend_to   := make_date(p_year, 12, 1);
+  ELSE
+    v_trend_to   := make_date(p_year, p_month, 1);
+    v_trend_from := (v_trend_to - interval '5 months')::date;
   END IF;
 
   RETURN jsonb_build_object(
@@ -87,7 +98,7 @@ BEGIN
 
       'avg_performance', (
         WITH curr AS (
-          SELECT ROUND(AVG(i.final_score)::numeric, 1) AS v
+          SELECT ROUND(AVG(i.final_score)::numeric, 2) AS v
           FROM   inspections   i
           JOIN   work_orders   wo ON wo.work_order_id = i.work_order_id
           WHERE  i.status = 'SUBMITTED'
@@ -95,7 +106,7 @@ BEGIN
             AND  wo.allocation_date BETWEEN v_from_date AND v_to_date
         ),
         prev AS (
-          SELECT ROUND(AVG(i.final_score)::numeric, 1) AS v
+          SELECT ROUND(AVG(i.final_score)::numeric, 2) AS v
           FROM   inspections   i
           JOIN   work_orders   wo ON wo.work_order_id = i.work_order_id
           WHERE  i.status = 'SUBMITTED'
@@ -104,14 +115,16 @@ BEGIN
         )
         SELECT jsonb_build_object(
           'value',     curr.v,
-          'trend_pts', ROUND(COALESCE(curr.v, 0) - COALESCE(prev.v, 0), 1)
+          'trend_pts', ROUND(COALESCE(curr.v, 0) - COALESCE(prev.v, 0), 2)
         )
         FROM curr, prev
       ),
 
       'pending_reviews', jsonb_build_object(
         'value', (
-          SELECT COUNT(*) FROM work_orders WHERE status = 'SUBMITTED'
+          SELECT COUNT(*) FROM work_orders
+          WHERE status IN ('SUBMITTED', 'PENDING_INSPECTION', 'INSPECTION_IN_PROGRESS', 'OVERDUE')
+            AND allocation_date BETWEEN v_from_date AND v_to_date
         )
       )
     ),
@@ -131,8 +144,8 @@ BEGIN
           ) AS row_data
         FROM (
           SELECT generate_series(
-            date_trunc('month', CURRENT_DATE - interval '5 months'),
-            date_trunc('month', CURRENT_DATE),
+            v_trend_from,
+            v_trend_to,
             interval '1 month'
           )::date AS month_start
         ) ms
@@ -148,10 +161,10 @@ BEGIN
     -- ── Compliance by category (period-filtered) ─────────────
     'compliance_by_category', (
       SELECT jsonb_build_object(
-        'hse',       ROUND(AVG(i.hse_score)::numeric,       1),
-        'technical', ROUND(AVG(i.technical_score)::numeric, 1),
-        'process',   ROUND(AVG(i.process_score)::numeric,   1),
-        'closure',   ROUND(AVG(i.closure_score)::numeric,   1)
+        'hse',       ROUND(AVG(i.hse_score)::numeric,       2),
+        'technical', ROUND(AVG(i.technical_score)::numeric, 2),
+        'process',   ROUND(AVG(i.process_score)::numeric,   2),
+        'closure',   ROUND(AVG(i.closure_score)::numeric,   2)
       )
       FROM  inspections i
       JOIN  work_orders wo ON wo.work_order_id = i.work_order_id
@@ -178,7 +191,7 @@ BEGIN
         JOIN  contractor_profiles cp ON cp.cr_number     = wo.contractor_cr
         WHERE i.status = 'SUBMITTED'
         ORDER BY i.submitted_at DESC
-        LIMIT 10
+        LIMIT 5
       ) sub
     ),
 
@@ -187,23 +200,33 @@ BEGIN
       SELECT COALESCE(jsonb_agg(row_data), '[]'::jsonb)
       FROM (
         SELECT jsonb_build_object(
-          'cr_number',          cp.cr_number,
-          'company_name',       cp.company_name,
-          'avg_score',          ROUND(AVG(i.final_score)::numeric, 1),
-          'total_projects',     COUNT(DISTINCT wo.work_order_id),
-          'completed_projects', COUNT(DISTINCT wo.work_order_id)
-            FILTER (WHERE wo.status = 'INSPECTION_COMPLETED')
+          'cr_number',          sub.cr_number,
+          'company_name',       sub.company_name,
+          'avg_score',          sub.avg_score,
+          'total_projects',     sub.total_projects,
+          'active_projects',    sub.active_projects,
+          'completed_projects', sub.completed_projects
         ) AS row_data
-        FROM  contractor_profiles cp
-        JOIN  work_orders         wo ON wo.contractor_cr    = cp.cr_number
-        JOIN  inspections         i  ON i.work_order_id     = wo.work_order_id
-        WHERE i.status = 'SUBMITTED'
-          AND i.final_score IS NOT NULL
-          AND wo.allocation_date BETWEEN v_from_date AND v_to_date
-        GROUP BY cp.cr_number, cp.company_name
-        ORDER BY AVG(i.final_score) DESC NULLS LAST
-        LIMIT 5
-      ) sub
+        FROM (
+          SELECT
+            cp.cr_number,
+            cp.company_name,
+            ROUND(AVG(i.final_score)::numeric, 2) AS avg_score,
+            COUNT(DISTINCT wo.work_order_id) AS total_projects,
+            COUNT(DISTINCT wo.work_order_id) FILTER (WHERE wo.status != 'INSPECTION_COMPLETED') AS active_projects,
+            COUNT(DISTINCT wo.work_order_id) FILTER (WHERE wo.status = 'INSPECTION_COMPLETED') AS completed_projects
+          FROM  contractor_profiles cp
+          JOIN  work_orders         wo ON wo.contractor_cr = cp.cr_number
+                                      AND wo.allocation_date BETWEEN v_from_date AND v_to_date
+          LEFT  JOIN inspections    i  ON i.work_order_id  = wo.work_order_id
+                                      AND i.status = 'SUBMITTED'
+                                      AND i.final_score IS NOT NULL
+          GROUP BY cp.cr_number, cp.company_name
+          HAVING AVG(i.final_score) IS NOT NULL
+          ORDER BY AVG(i.final_score) DESC NULLS LAST
+          LIMIT 5
+        ) sub
+      ) agg
     )
 
   ); -- end RETURN

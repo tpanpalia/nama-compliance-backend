@@ -52,6 +52,26 @@ export class SupabaseAdapter implements StorageService {
     return data.signedUrl
   }
 
+  async presignReadThumb(s3Key: string, expiresInSeconds = 3600): Promise<string> {
+    const { data, error } = await this.client.storage
+      .from(this.bucket)
+      .createSignedUrl(s3Key, expiresInSeconds, {
+        transform: { width: 200, height: 200, resize: 'cover' },
+      })
+
+    if (error || !data) {
+      throw new Error(`Supabase signed URL failed: ${error?.message}`)
+    }
+    return data.signedUrl
+  }
+
+  async upload(s3Key: string, buffer: Buffer, mimeType: string): Promise<void> {
+    const { error } = await this.client.storage
+      .from(this.bucket)
+      .upload(s3Key, buffer, { contentType: mimeType, upsert: true })
+    if (error) throw new Error(`Supabase upload failed: ${error.message}`)
+  }
+
   async delete(s3Key: string): Promise<void> {
     const { error } = await this.client.storage
       .from(this.bucket)

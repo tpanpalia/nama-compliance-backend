@@ -4,6 +4,7 @@ import { accessRequestService } from '../../services/admin/accessRequest.service
 import { qs, qsDefault } from '../../utils/query'
 
 const rejectSchema = z.object({ reason: z.string().min(1) })
+const verifyDocSchema = z.object({ verificationStatus: z.enum(['VERIFIED', 'REJECTED']) })
 
 export const list = async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -35,6 +36,28 @@ export const reject = async (req: Request, res: Response, next: NextFunction) =>
   try {
     const { reason } = rejectSchema.parse(req.body)
     const result = await accessRequestService.reject(req.user!.userId, req.params.id, reason)
+    res.json(result)
+  } catch (err) { next(err) }
+}
+
+export const deactivate = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const result = await accessRequestService.deactivate(req.user!.userId, req.params.id)
+    res.json(result)
+  } catch (err) { next(err) }
+}
+
+export const reactivate = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const result = await accessRequestService.reactivate(req.user!.userId, req.params.id)
+    res.json(result)
+  } catch (err) { next(err) }
+}
+
+export const verifyDocument = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { verificationStatus } = verifyDocSchema.parse(req.body)
+    const result = await accessRequestService.verifyDocument(req.user!.userId, req.params.id, verificationStatus)
     res.json(result)
   } catch (err) { next(err) }
 }

@@ -2,6 +2,7 @@ import { FileCategory } from '@prisma/client'
 import { AppError } from '../middleware/errorHandler'
 import { fileRepository } from '../repositories/file.repository'
 import { getStorageService } from '../lib/storage'
+import { prisma } from '../lib/prisma'
 
 export const fileService = {
   presign: async (userId: string, data: {
@@ -36,11 +37,44 @@ export const fileService = {
     return { ok: true, fileId: file.id }
   },
 
-  getUrl: async (fileId: string) => {
+  getUrl: async (fileId: string, userId: string, userRole: string) => {
     const file = await fileRepository.findById(fileId)
     if (!file || file.isDeleted) throw new AppError(404, 'File not found')
 
-    const url = await getStorageService().presignRead(file.s3Key, 3600)
-    return { url, expiresInSeconds: 3600 }
+    // ADMIN and REGULATOR can access all files
+    if (userRole !== 'ADMIN' && userRole !== 'REGULATOR') {
+      // Check if user is the uploader
+      const isUploader = file.uploadedBy === userId
+
+      if (!isUploader) {
+        // For INSPECTOR: also allow if the file is evidence on a WO assigned to them
+        let hasAccess = false
+        if (userRole === 'INSPECTOR') {
+          const evidenceLink = await prisma.evidence.findFirst({
+            where: { fileId: file.id },
+            include: { workOrder: { select: { assignedInspectorId: true } } },
+          })
+          if (evidenceLink?.workOrder.assignedInspectorId === userId) {
+            hasAccess = true
+          }
+        }
+
+        if (!hasAccess) {
+          throw new AppError(403, 'You do not have access to this file')
+        }
+      }
+    }
+
+    try {
+      const storage = getStorageService()
+      const isImage = file.mimeType?.startsWith('image/')
+      const [url, thumbnailUrl] = await Promise.all([
+        storage.presignRead(file.s3Key, 3600),
+        isImage ? storage.presignReadThumb(file.s3Key, 3600).catch(() => null) : Promise.resolve(null),
+      ])
+      return { url, thumbnailUrl, expiresInSeconds: 3600 }
+    } catch {
+      return { url: '', thumbnailUrl: null, expiresInSeconds: 0 }
+    }
   },
 }

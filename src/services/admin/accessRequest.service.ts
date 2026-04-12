@@ -1,3 +1,4 @@
+import crypto from 'crypto'
 import bcrypt from 'bcryptjs'
 import { AppError } from '../../middleware/errorHandler'
 import { accessRequestRepository } from '../../repositories/accessRequest.repository'
@@ -19,7 +20,23 @@ export const accessRequestService = {
       accessRequestRepository.count(where),
     ])
 
-    return { items, total }
+    // For approved requests, look up the current User status by email
+    const approvedEmails = items
+      .filter((r) => r.status === 'APPROVED')
+      .map((r) => r.email)
+
+    let userStatusMap: Record<string, string> = {}
+    if (approvedEmails.length > 0) {
+      const users = await userRepository.findStatusesByEmails(approvedEmails)
+      userStatusMap = Object.fromEntries(users.map((u) => [u.email, u.status]))
+    }
+
+    const itemsWithUserStatus = items.map((r) => ({
+      ...r,
+      userStatus: r.status === 'APPROVED' ? (userStatusMap[r.email] ?? null) : null,
+    }))
+
+    return { items: itemsWithUserStatus, total }
   },
 
   getById: async (id: string) => {
@@ -36,7 +53,7 @@ export const accessRequestService = {
     const existingUser = await userRepository.findByEmail(request.email)
     if (existingUser) throw new AppError(409, 'A user with this email already exists')
 
-    const tempPassword = `Temp@${Math.random().toString(36).slice(2, 8).toUpperCase()}`
+    const tempPassword = `Temp@${crypto.randomBytes(6).toString('hex').toUpperCase()}`
     const passwordHash = await bcrypt.hash(tempPassword, 12)
 
     let userId: string
@@ -117,5 +134,71 @@ export const accessRequestService = {
     })
 
     return { ok: true }
+  },
+
+  deactivate: async (performedBy: string, requestId: string) => {
+    const request = await accessRequestRepository.findById(requestId)
+    if (!request) throw new AppError(404, 'Access request not found')
+    if (request.status !== 'APPROVED') throw new AppError(400, 'Only approved requests can be deactivated')
+
+    // Find the user created from this access request by email
+    const user = await userRepository.findByEmail(request.email)
+    if (!user) throw new AppError(404, 'No user found for this access request')
+
+    // Suspend the user
+    await userRepository.updateStatus(user.id, 'SUSPENDED')
+
+    // Mark the access request as deactivated
+    await accessRequestRepository.deactivate(requestId, performedBy)
+
+    await auditLogRepository.create({
+      performedBy,
+      entityType: 'ACCESS_REQUEST',
+      entityId:   requestId,
+      action:     'DEACTIVATED',
+      metadata:   { userId: user.id, email: request.email },
+    })
+
+    return { ok: true }
+  },
+
+  reactivate: async (performedBy: string, requestId: string) => {
+    const request = await accessRequestRepository.findById(requestId)
+    if (!request) throw new AppError(404, 'Access request not found')
+    if (request.status !== 'DEACTIVATED') throw new AppError(400, 'Only deactivated requests can be reactivated')
+
+    const user = await userRepository.findByEmail(request.email)
+    if (!user) throw new AppError(404, 'No user found for this access request')
+
+    await userRepository.updateStatus(user.id, 'ACTIVE')
+    await accessRequestRepository.approve(requestId, performedBy)
+
+    await auditLogRepository.create({
+      performedBy,
+      entityType: 'ACCESS_REQUEST',
+      entityId:   requestId,
+      action:     'ACTIVATED',
+      metadata:   { userId: user.id, email: request.email },
+    })
+
+    return { ok: true }
+  },
+
+  verifyDocument: async (performedBy: string, requestId: string, verificationStatus: 'VERIFIED' | 'REJECTED') => {
+    const request = await accessRequestRepository.findById(requestId)
+    if (!request) throw new AppError(404, 'Access request not found')
+    if (request.status !== 'PENDING') throw new AppError(400, 'Can only verify documents on pending requests')
+
+    await accessRequestRepository.updateVerificationStatus(requestId, verificationStatus)
+
+    await auditLogRepository.create({
+      performedBy,
+      entityType: 'ACCESS_REQUEST',
+      entityId:   requestId,
+      action:     `DOCUMENT_${verificationStatus}`,
+      metadata:   { verificationStatus },
+    })
+
+    return { ok: true, verificationStatus }
   },
 }

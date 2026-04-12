@@ -1,23 +1,57 @@
+import crypto from 'crypto'
 import bcrypt from 'bcryptjs'
 import { AppError } from '../middleware/errorHandler'
 import { userRepository } from '../repositories/user.repository'
 import { signAccessToken, signRefreshToken, verifyRefreshToken } from '../lib/jwt'
 import { generateRequestId } from '../utils/ids'
 import { accessRequestRepository } from '../repositories/accessRequest.repository'
+import { prisma } from '../lib/prisma'
+import { sendOtpEmail } from '../lib/email'
 
 export const authService = {
   login: async (email: string, password: string) => {
+    const MAX_ATTEMPTS = 5
+    const LOCKOUT_MINUTES = 15
+
     const user = await userRepository.findByEmail(email.toLowerCase())
-    if (!user || !(await bcrypt.compare(password, user.passwordHash))) {
-      throw new AppError(401, 'Invalid email or password')
+    if (!user) throw new AppError(401, 'Invalid email or password')
+
+    // Check if account is locked
+    if (user.lockedUntil && user.lockedUntil > new Date()) {
+      const minutesLeft = Math.ceil((user.lockedUntil.getTime() - Date.now()) / 60000)
+      throw new AppError(423, `Account locked due to too many failed attempts. Try again in ${minutesLeft} minute(s).`)
     }
+
+    // Check password
+    const passwordValid = await bcrypt.compare(password, user.passwordHash)
+    if (!passwordValid) {
+      const attempts = (user.failedLoginAttempts || 0) + 1
+      const lockout = attempts >= MAX_ATTEMPTS ? new Date(Date.now() + LOCKOUT_MINUTES * 60 * 1000) : null
+      await prisma.user.update({
+        where: { id: user.id },
+        data: { failedLoginAttempts: attempts, lockedUntil: lockout },
+      })
+      if (lockout) {
+        throw new AppError(423, `Account locked after ${MAX_ATTEMPTS} failed attempts. Try again in ${LOCKOUT_MINUTES} minutes.`)
+      }
+      throw new AppError(401, `Invalid email or password. ${MAX_ATTEMPTS - attempts} attempt(s) remaining.`)
+    }
+
     if (user.status !== 'ACTIVE') {
       throw new AppError(403, `Account is ${user.status.toLowerCase()}. Contact administrator.`)
     }
 
+    // Reset failed attempts on successful login
+    if (user.failedLoginAttempts > 0 || user.lockedUntil) {
+      await prisma.user.update({
+        where: { id: user.id },
+        data: { failedLoginAttempts: 0, lockedUntil: null },
+      })
+    }
+
     await userRepository.updateLastLogin(user.id)
 
-    const payload      = { userId: user.id, role: user.role, email: user.email }
+    const payload      = { userId: user.id, role: user.role, email: user.email, tokenVersion: user.tokenVersion }
     const accessToken  = signAccessToken(payload)
     const refreshToken = signRefreshToken({ userId: user.id })
 
@@ -35,7 +69,7 @@ export const authService = {
     const user    = await userRepository.findById(decoded.userId)
     if (!user || user.status !== 'ACTIVE') throw new AppError(401, 'Invalid refresh token')
 
-    const accessToken = signAccessToken({ userId: user.id, role: user.role, email: user.email })
+    const accessToken = signAccessToken({ userId: user.id, role: user.role, email: user.email, tokenVersion: user.tokenVersion })
     return { accessToken }
   },
 
@@ -122,7 +156,78 @@ export const authService = {
       throw new AppError(400, 'Current password is incorrect')
     }
     const hash = await bcrypt.hash(newPassword, 12)
-    await userRepository.updatePassword(userId, hash)
+    await prisma.user.update({
+      where: { id: userId },
+      data: { passwordHash: hash, tokenVersion: { increment: 1 } },
+    })
     return { message: 'Password updated' }
+  },
+
+  forgotPassword: async (email: string) => {
+    const user = await userRepository.findByEmail(email.toLowerCase())
+    if (!user) return { ok: true } // Don't reveal if email exists
+
+    // Rate limit: max 3 OTPs per email per hour
+    const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000)
+    const recentCount = await prisma.passwordResetOtp.count({
+      where: { email: email.toLowerCase(), createdAt: { gt: oneHourAgo } },
+    })
+    if (recentCount >= 3) throw new AppError(429, 'Too many OTP requests. Please try again later.')
+
+    // Generate 6-digit OTP
+    const otp = String(crypto.randomInt(100000, 1000000))
+    const expiresAt = new Date(Date.now() + 10 * 60 * 1000) // 10 minutes
+
+    // Invalidate previous OTPs for this email
+    await prisma.passwordResetOtp.updateMany({
+      where: { email: email.toLowerCase(), used: false },
+      data: { used: true },
+    })
+
+    // Store new OTP
+    await prisma.passwordResetOtp.create({
+      data: { email: email.toLowerCase(), otp, expiresAt },
+    })
+
+    // Send email
+    await sendOtpEmail(email.toLowerCase(), otp)
+
+    return { ok: true }
+  },
+
+  verifyOtp: async (email: string, otp: string) => {
+    const record = await prisma.passwordResetOtp.findFirst({
+      where: { email: email.toLowerCase(), otp, used: false, expiresAt: { gt: new Date() } },
+      orderBy: { createdAt: 'desc' },
+    })
+    if (!record) throw new AppError(400, 'Invalid or expired OTP')
+    return { ok: true, valid: true }
+  },
+
+  resetPassword: async (email: string, otp: string, newPassword: string) => {
+    const record = await prisma.passwordResetOtp.findFirst({
+      where: { email: email.toLowerCase(), otp, used: false, expiresAt: { gt: new Date() } },
+      orderBy: { createdAt: 'desc' },
+    })
+    if (!record) throw new AppError(400, 'Invalid or expired OTP')
+
+    const user = await userRepository.findByEmail(email.toLowerCase())
+    if (!user) throw new AppError(404, 'User not found')
+
+    const hash = await bcrypt.hash(newPassword, 12)
+
+    // Update password and increment tokenVersion to invalidate all existing tokens
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { passwordHash: hash, tokenVersion: { increment: 1 } },
+    })
+
+    // Mark OTP as used
+    await prisma.passwordResetOtp.update({
+      where: { id: record.id },
+      data: { used: true },
+    })
+
+    return { ok: true }
   },
 }

@@ -31,3 +31,24 @@ export const governorates = async (req: Request, res: Response, next: NextFuncti
     res.json(result)
   } catch (err) { next(err) }
 }
+
+const generateSchema = z.object({
+  reportType: z.enum(['performance-summary', 'contractor-performance']),
+  regions: z.array(z.string()).optional(),
+  contractors: z.array(z.string()).optional(),
+  years: z.array(z.number().int()),
+  months: z.array(z.number().int().min(1).max(12)).optional(),
+})
+
+export const generate = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const data = generateSchema.parse(req.body)
+    const result = await adminReportService.generate(req.user!.userId, data)
+
+    const filename = `${data.reportType}-${new Date().toISOString().split('T')[0]}.pdf`
+    res.setHeader('Content-Type', 'application/pdf')
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`)
+    res.setHeader('X-File-Id', result.fileId)
+    res.send(result.buffer)
+  } catch (err) { next(err) }
+}

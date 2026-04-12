@@ -1,3 +1,4 @@
+import crypto from 'crypto'
 import bcrypt from 'bcryptjs'
 import { UserRole, UserStatus } from '@prisma/client'
 import { AppError } from '../../middleware/errorHandler'
@@ -45,7 +46,7 @@ export const adminUserService = {
     const empExists = await userRepository.staffProfileExists(data.employeeId)
     if (empExists) throw new AppError(409, 'Employee ID already in use')
 
-    const tempPassword = `Temp@${Math.random().toString(36).slice(2, 8).toUpperCase()}`
+    const tempPassword = `Temp@${crypto.randomBytes(6).toString('hex').toUpperCase()}`
     const passwordHash = await bcrypt.hash(tempPassword, 12)
 
     const user = await userRepository.create({

@@ -18,9 +18,31 @@ export const checklistService = {
     category: ChecklistCategory
     weight: number
     order: number
+    mandatory?: boolean
+    isActive?: boolean
   }) => {
     const exists = await checklistRepository.findById(data.id)
-    if (exists) throw new AppError(409, `Checklist item ${data.id} already exists`)
+
+    if (exists) {
+      // Update existing item
+      const updated = await checklistRepository.update(data.id, {
+        question:  data.question,
+        weight:    data.weight,
+        order:     data.order,
+        mandatory: data.mandatory,
+        isActive:  data.isActive,
+      })
+
+      await auditLogRepository.create({
+        performedBy,
+        entityType: 'CHECKLIST',
+        entityId:   data.id,
+        action:     'UPDATED',
+        metadata:   data,
+      })
+
+      return updated
+    }
 
     const item = await checklistRepository.create(data)
 

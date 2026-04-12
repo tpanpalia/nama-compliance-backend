@@ -37,4 +37,9 @@ export const regulatorContractorService = {
     const result = await dashboardRepository.getContractorPerformance(cr, year, month)
     return (result[0] as Record<string, unknown>)['get_contractor_performance']
   },
+
+  getSummary: async () => {
+    const result = await dashboardRepository.getContractorsSummary()
+    return (result[0] as Record<string, unknown>)['get_contractors_summary']
+  },
 }

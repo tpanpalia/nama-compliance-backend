@@ -1,0 +1,58 @@
+-- ============================================================
+-- get_contractors_summary()
+--
+-- Returns a lightweight summary for ALL active contractors:
+--   cr_number, avg_score, assigned, in_progress, completed, total_work_orders
+--
+-- Used by: Regulator Contractors list page (card grid)
+-- Instead of N individual get_contractor_performance() calls
+--
+-- Called by: GET /api/regulator/contractors/summary
+-- ============================================================
+
+CREATE OR REPLACE FUNCTION get_contractors_summary()
+RETURNS jsonb
+LANGUAGE plpgsql
+STABLE
+AS $$
+BEGIN
+  RETURN (
+    SELECT COALESCE(jsonb_agg(row_data), '[]'::jsonb)
+    FROM (
+      SELECT jsonb_build_object(
+        'cr_number',        cp.cr_number,
+        'total_work_orders', COALESCE(wo_stats.total, 0),
+        'completed',         COALESCE(wo_stats.completed, 0),
+        'assigned',          COALESCE(wo_stats.assigned, 0),
+        'in_progress',       COALESCE(wo_stats.in_progress, 0),
+        'active',            COALESCE(wo_stats.active, 0),
+        'avg_score',         cp.avg_score,
+        'total_inspections', COALESCE(cp.total_inspections, 0)
+      ) AS row_data
+      FROM contractor_profiles cp
+      JOIN users u ON u.id = cp.user_id
+      LEFT JOIN LATERAL (
+        SELECT
+          COUNT(DISTINCT wo.work_order_id) AS total,
+          COUNT(DISTINCT wo.work_order_id)
+            FILTER (WHERE wo.status = 'ASSIGNED') AS assigned,
+          COUNT(DISTINCT wo.work_order_id)
+            FILTER (WHERE wo.status = 'IN_PROGRESS') AS in_progress,
+          COUNT(DISTINCT wo.work_order_id)
+            FILTER (WHERE wo.status IN (
+              'SUBMITTED','PENDING_INSPECTION','INSPECTION_IN_PROGRESS','OVERDUE'
+            )) AS completed,
+          COUNT(DISTINCT wo.work_order_id)
+            FILTER (WHERE wo.status IN (
+              'ASSIGNED','IN_PROGRESS','SUBMITTED',
+              'PENDING_INSPECTION','INSPECTION_IN_PROGRESS','OVERDUE'
+            )) AS active
+        FROM work_orders wo
+        WHERE wo.contractor_cr = cp.cr_number
+      ) wo_stats ON true
+      WHERE u.status != 'INACTIVE'
+      ORDER BY cp.company_name ASC
+    ) sub
+  );
+END;
+$$;

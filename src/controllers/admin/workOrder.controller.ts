@@ -5,14 +5,12 @@ import { adminWorkOrderService } from '../../services/admin/workOrder.service'
 import { qs, qsDefault } from '../../utils/query'
 
 const createSchema = z.object({
-  contractorCr:         z.string().min(1),
   governorateCode:      z.string().min(1),
   siteName:             z.string().min(1),
   description:          z.string().optional(),
   priority:             z.nativeEnum(WorkOrderPriority).default('MEDIUM'),
   allocationDate:       z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   targetCompletionDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-  assignedInspectorId:  z.string().uuid().optional(),
 })
 
 const updateSchema = z.object({
@@ -20,6 +18,7 @@ const updateSchema = z.object({
   description:          z.string().optional(),
   priority:             z.nativeEnum(WorkOrderPriority).optional(),
   targetCompletionDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  contractorCr:         z.string().min(1).optional(),
 }).strict()
 
 const assignSchema = z.object({ inspectorId: z.string().uuid() })
@@ -31,6 +30,9 @@ export const list = async (req: Request, res: Response, next: NextFunction) => {
       contractorCr:    qs(req.query.contractorCr),
       inspectorId:     qs(req.query.inspectorId),
       governorateCode: qs(req.query.governorateCode),
+      search:          qs(req.query.search),
+      years:           qs(req.query.years),
+      months:          qs(req.query.months),
       page:            parseInt(qsDefault(req.query.page,  '1'),  10),
       limit:           parseInt(qsDefault(req.query.limit, '20'), 10),
     })
@@ -61,10 +63,40 @@ export const assign = async (req: Request, res: Response, next: NextFunction) =>
   } catch (err) { next(err) }
 }
 
+const bulkImportSchema = z.object({
+  workOrders: z.array(z.object({
+    governorateCode: z.string().min(1),
+    siteName: z.string().min(1),
+    description: z.string().optional(),
+    workType: z.string().optional(),
+    priority: z.nativeEnum(WorkOrderPriority).default('MEDIUM'),
+    allocationDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+    targetCompletionDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  })),
+})
+
+export const bulkImport = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { workOrders } = bulkImportSchema.parse(req.body)
+    const results = await adminWorkOrderService.bulkCreate(req.user!.userId, workOrders)
+    res.status(201).json({ ok: true, imported: results.length })
+  } catch (err) { next(err) }
+}
+
 export const update = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const data   = updateSchema.parse(req.body)
     const result = await adminWorkOrderService.update(req.user!.userId, req.params.id, data)
+    res.json(result)
+  } catch (err) { next(err) }
+}
+
+const reopenSchema = z.object({ reason: z.string().min(1, 'Reason is required') })
+
+export const reopen = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { reason } = reopenSchema.parse(req.body)
+    const result = await adminWorkOrderService.reopen(req.user!.userId, req.params.id, reason)
     res.json(result)
   } catch (err) { next(err) }
 }

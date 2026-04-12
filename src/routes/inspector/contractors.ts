@@ -3,12 +3,9 @@ import * as contractorController from '../../controllers/admin/contractor.contro
 
 const router = Router()
 
-router.post('/',                    contractorController.create)
+// Inspectors can view contractors (read-only: list, get by CR, performance)
 router.get('/',                     contractorController.list)
-router.get('/summary',              contractorController.getSummary)
 router.get('/:cr',                  contractorController.getById)
 router.get('/:cr/performance',      contractorController.getPerformance)
-router.patch('/:cr',                contractorController.update)
-router.patch('/:cr/status',         contractorController.updateStatus)
 
 export default router

@@ -63,6 +63,16 @@ export const contractorRepository = {
   updateUserStatus: (userId: string, status: UserStatus) =>
     prisma.user.update({ where: { id: userId }, data: { status } }),
 
+  update: (crNumber: string, data: {
+    companyName?: string
+    contactName?: string
+    email?: string
+    phone?: string
+    address?: string
+    regionsOfOperation?: string[]
+  }) =>
+    prisma.contractorProfile.update({ where: { crNumber }, data }),
+
   createWithUser: (data: Parameters<typeof prisma.user.create>[0]['data']) =>
     prisma.user.create({ data }),
 }

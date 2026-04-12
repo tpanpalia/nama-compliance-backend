@@ -44,6 +44,12 @@ export const userRepository = {
   count: (where: Prisma.UserWhereInput) =>
     prisma.user.count({ where }),
 
+  findStatusesByEmails: (emails: string[]) =>
+    prisma.user.findMany({
+      where: { email: { in: emails } },
+      select: { email: true, status: true },
+    }),
+
   findActiveAdmins: () =>
     prisma.user.findMany({ where: { role: 'ADMIN', status: 'ACTIVE' } }),
 

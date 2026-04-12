@@ -16,7 +16,9 @@ export const contractorWorkOrderService = {
     const skip  = (params.page - 1) * params.limit
     const where = {
       contractorCr: profile.crNumber,
-      ...(params.status ? { status: params.status as WorkOrderStatus } : {}),
+      status: params.status
+        ? (params.status as WorkOrderStatus)
+        : { not: 'UNASSIGNED' as WorkOrderStatus },
     }
 
     const [items, total] = await Promise.all([
@@ -70,7 +72,20 @@ export const contractorWorkOrderService = {
     if (evidenceCount === 0) throw new AppError(400, 'At least one evidence item must be uploaded before submitting')
 
     const now     = new Date()
-    const updated = await workOrderRepository.update(workOrderId, { status: 'SUBMITTED', submissionDate: now })
+
+    // Calculate inspection deadline based on submission date
+    const day = now.getDate()
+    let inspectionDeadline: Date
+    if (day <= 25) {
+      // Rule 1: Days 1-25 → last day of same month
+      inspectionDeadline = new Date(now.getFullYear(), now.getMonth() + 1, 0) // day 0 of next month = last day of current month
+    } else {
+      // Rule 2: Days 26-31 → last day of month + 7 days grace
+      const lastDayOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0)
+      inspectionDeadline = new Date(lastDayOfMonth.getTime() + 7 * 24 * 60 * 60 * 1000)
+    }
+
+    const updated = await workOrderRepository.update(workOrderId, { status: 'SUBMITTED', submissionDate: now, inspectionDeadline })
 
     await auditLogRepository.create({
       performedBy: userId,
@@ -103,6 +118,7 @@ export const contractorWorkOrderService = {
     gpsLat?:         number
     gpsLng?:         number
     gpsAccuracy?:    number
+    gpsAddress?:     string
     capturedAt?:     string
   }) => {
     const profile = await contractorRepository.findByUserId(userId)
@@ -131,6 +147,7 @@ export const contractorWorkOrderService = {
       gpsLat:          data.gpsLat,
       gpsLng:          data.gpsLng,
       gpsAccuracy:     data.gpsAccuracy,
+      gpsAddress:      data.gpsAddress,
       capturedAt:      data.capturedAt ? new Date(data.capturedAt) : undefined,
     })
   },
