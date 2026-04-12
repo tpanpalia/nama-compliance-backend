@@ -26,7 +26,8 @@ BEGIN
         'assigned',          COALESCE(wo_stats.assigned, 0),
         'in_progress',       COALESCE(wo_stats.in_progress, 0),
         'active',            COALESCE(wo_stats.active, 0),
-        'avg_score',         wo_stats.avg_score
+        'avg_score',         cp.avg_score,
+        'total_inspections', COALESCE(cp.total_inspections, 0)
       ) AS row_data
       FROM contractor_profiles cp
       JOIN users u ON u.id = cp.user_id
@@ -45,12 +46,8 @@ BEGIN
             FILTER (WHERE wo.status IN (
               'ASSIGNED','IN_PROGRESS','SUBMITTED',
               'PENDING_INSPECTION','INSPECTION_IN_PROGRESS','OVERDUE'
-            )) AS active,
-          ROUND(AVG(i.final_score)::numeric, 2) AS avg_score
+            )) AS active
         FROM work_orders wo
-        LEFT JOIN inspections i
-          ON i.work_order_id = wo.work_order_id
-          AND i.status = 'SUBMITTED'
         WHERE wo.contractor_cr = cp.cr_number
       ) wo_stats ON true
       WHERE u.status != 'INACTIVE'

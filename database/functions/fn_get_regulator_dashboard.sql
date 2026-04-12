@@ -143,48 +143,18 @@ BEGIN
       ) sub
     ),
 
-    -- ── Compliance distribution — one score per contractor ────
-    -- Uses the contractor's latest inspection score in the period.
+    -- ── Compliance distribution — uses cached avg_score from contractor_profiles ──
     'compliance_distribution', (
       SELECT jsonb_build_object(
-        'excellent', COUNT(*) FILTER (WHERE final_score >= 90),
-        'good',      COUNT(*) FILTER (WHERE final_score >= 80 AND final_score < 90),
-        'fair',      COUNT(*) FILTER (WHERE final_score >= 70 AND final_score < 80),
-        'poor',      COUNT(*) FILTER (WHERE final_score < 70)
+        'excellent', COUNT(*) FILTER (WHERE cp.avg_score >= 90),
+        'good',      COUNT(*) FILTER (WHERE cp.avg_score >= 80 AND cp.avg_score < 90),
+        'fair',      COUNT(*) FILTER (WHERE cp.avg_score >= 70 AND cp.avg_score < 80),
+        'poor',      COUNT(*) FILTER (WHERE cp.avg_score < 70)
       )
-      FROM (
-        SELECT DISTINCT ON (wo.contractor_cr)
-          i.final_score
-        FROM  inspections   i
-        JOIN  work_orders   wo ON wo.work_order_id = i.work_order_id
-        WHERE i.status = 'SUBMITTED'
-          AND i.final_score IS NOT NULL
-          AND wo.allocation_date BETWEEN p_from_date AND p_to_date
-        ORDER BY wo.contractor_cr, i.submitted_at DESC
-      ) latest
-    ),
-
-    -- ── Regional performance (all governorates) ───────────────
-    'regional_performance', (
-      SELECT COALESCE(jsonb_agg(row_data ORDER BY avg_score DESC NULLS LAST), '[]'::jsonb)
-      FROM (
-        SELECT
-          jsonb_build_object(
-            'governorate_code',   g.code,
-            'governorate_name',   g.name_en,
-            'active_contractors', COUNT(DISTINCT wo.contractor_cr),
-            'total_inspections',  COUNT(i.id),
-            'avg_score',          ROUND(AVG(i.final_score)::numeric, 1),
-            'latest_inspection',  MAX(i.submitted_at)
-          ) AS row_data,
-          AVG(i.final_score) AS avg_score
-        FROM  governorates   g
-        LEFT  JOIN work_orders   wo ON wo.governorate_code = g.code
-                AND wo.allocation_date BETWEEN p_from_date AND p_to_date
-        LEFT  JOIN inspections   i  ON i.work_order_id     = wo.work_order_id
-                AND i.status = 'SUBMITTED'
-        GROUP BY g.code, g.name_en
-      ) sub
+      FROM contractor_profiles cp
+      JOIN users u ON u.id = cp.user_id
+      WHERE u.status != 'INACTIVE'
+        AND cp.avg_score IS NOT NULL
     ),
 
     -- ── Category performance (period-filtered) ────────────────

@@ -222,6 +222,9 @@ model ContractorProfile {
   phone              String
   address            String?
   regionsOfOperation String[]  @default([]) @map("regions_of_operation")
+  avgScore           Decimal?  @map("avg_score") @db.Decimal(5, 2)
+  totalInspections   Int       @default(0) @map("total_inspections")
+  scoreUpdatedAt     DateTime? @map("score_updated_at") @db.Timestamptz
   createdAt          DateTime  @default(now()) @map("created_at") @db.Timestamptz
   updatedAt          DateTime  @updatedAt @map("updated_at") @db.Timestamptz
 

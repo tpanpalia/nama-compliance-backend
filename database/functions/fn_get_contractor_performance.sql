@@ -40,21 +40,23 @@ BEGIN
     -- ── Contractor profile ────────────────────────────────────
     'profile', (
       SELECT jsonb_build_object(
-        'cr_number',    cp.cr_number,
-        'company_name', cp.company_name,
-        'contact_name', cp.contact_name,
-        'email',        cp.email,
-        'phone',        cp.phone,
-        'regions',      cp.regions_of_operation,
-        'status',       u.status,
-        'joined_at',    cp.created_at
+        'cr_number',        cp.cr_number,
+        'company_name',     cp.company_name,
+        'contact_name',     cp.contact_name,
+        'email',            cp.email,
+        'phone',            cp.phone,
+        'regions',          cp.regions_of_operation,
+        'status',           u.status,
+        'joined_at',        cp.created_at,
+        'avg_score',        cp.avg_score,
+        'total_inspections', cp.total_inspections
       )
       FROM  contractor_profiles cp
       JOIN  users               u ON u.id = cp.user_id
       WHERE cp.cr_number = p_cr_number
     ),
 
-    -- ── Summary stats ─────────────────────────────────────────
+    -- ── Summary stats (uses cached avg_score from contractor_profiles) ──
     'summary', (
       SELECT jsonb_build_object(
         'total_work_orders', COUNT(DISTINCT wo.work_order_id),
@@ -65,7 +67,7 @@ BEGIN
             'ASSIGNED','IN_PROGRESS','SUBMITTED',
             'PENDING_INSPECTION','INSPECTION_IN_PROGRESS'
           )),
-        'avg_score',         ROUND(AVG(i.final_score)::numeric, 1),
+        'avg_score',         (SELECT cp2.avg_score FROM contractor_profiles cp2 WHERE cp2.cr_number = p_cr_number),
         'compliance_distribution', jsonb_build_object(
           'excellent', COUNT(*) FILTER (WHERE i.compliance_rating = 'EXCELLENT'),
           'good',      COUNT(*) FILTER (WHERE i.compliance_rating = 'GOOD'),
@@ -77,7 +79,6 @@ BEGIN
       LEFT  JOIN inspections i ON i.work_order_id = wo.work_order_id
                                AND i.status = 'SUBMITTED'
       WHERE wo.contractor_cr     = p_cr_number
-        AND wo.allocation_date   BETWEEN v_from_date AND v_to_date
     ),
 
     -- ── Average category scores ───────────────────────────────

@@ -145,6 +145,27 @@ export const inspectorInspectionService = {
       }),
     ])
 
+    // Update contractor's cached compliance score
+    const contractorCr = inspection.workOrder.contractorCr
+    if (contractorCr) {
+      const allScores = await prisma.inspection.findMany({
+        where: { workOrder: { contractorCr }, status: 'SUBMITTED', finalScore: { not: null } },
+        select: { finalScore: true },
+      })
+      const totalInspections = allScores.length
+      const avgScore = totalInspections > 0
+        ? allScores.reduce((sum, i) => sum + Number(i.finalScore), 0) / totalInspections
+        : null
+      await prisma.contractorProfile.update({
+        where: { crNumber: contractorCr },
+        data: {
+          avgScore: avgScore !== null ? Math.round(avgScore * 100) / 100 : null,
+          totalInspections,
+          scoreUpdatedAt: now,
+        },
+      })
+    }
+
     const admins = await userRepository.findActiveAdmins()
     if (admins.length > 0) {
       await notificationRepository.createMany({
