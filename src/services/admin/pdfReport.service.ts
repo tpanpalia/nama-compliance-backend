@@ -183,11 +183,11 @@ function headerHTML(reportType: string, logo: string): string {
 }
 
 function sectionHeader(title: string): string {
-  return `<div style="display:flex;align-items:center;gap:8px;margin:16px 0 8px"><div style="width:4px;height:22px;background:#02474E;border-radius:2px"></div><div style="font-size:14pt;font-weight:700;color:#333">${title}</div></div>`
+  return `<div style="display:flex;align-items:center;margin:16px 0 8px;background:#EBF5F7;border-left:4px solid #02474E;padding:8px 12px;border-radius:0 3px 3px 0"><div style="font-size:13pt;font-weight:700;color:#02474E">${title}</div></div>`
 }
 
-function kpiBox(value: string, label: string, sub?: string, color?: string): string {
-  return `<div style="flex:1;border:1px solid #ddd;border-radius:6px;padding:12px 6px;text-align:center">
+function kpiBox(value: string, label: string, sub?: string, color?: string, topColor?: string): string {
+  return `<div style="flex:1;border:1px solid #ddd;border-top:4px solid ${topColor || '#02474E'};border-radius:0 0 6px 6px;padding:12px 6px;text-align:center">
     <div style="font-size:22pt;font-weight:700;color:${color || '#02474E'}">${value}</div>
     <div style="font-size:7.5pt;color:#666;margin-top:4px">${label}</div>
     ${sub ? `<div style="font-size:6.5pt;color:#999;margin-top:2px">${sub}</div>` : ''}
@@ -207,13 +207,17 @@ const CSS = `
   body { font-family: 'Segoe UI', Arial, Helvetica, sans-serif; font-size:9pt; color:#333; line-height:1.4; padding:0 }
   .page-break { page-break-before:always }
   .avoid-break { page-break-inside:avoid }
-  table { width:100%; border-collapse:collapse; font-size:8pt; margin-bottom:6px }
-  th { background:#02474E; color:#fff; font-weight:600; padding:6px 5px; text-align:left; font-size:7.5pt }
-  td { padding:5px; border-bottom:1px solid #eee; vertical-align:middle }
-  tr:nth-child(even) { background:#fafafa }
+  table { width:calc(100% - 84px); border-collapse:collapse; font-size:8pt; margin:0 48px 6px 36px; border:1px solid #ddd }
+  th { background:#02474E; color:#fff; font-weight:600; padding:6px 5px; text-align:center; font-size:7.5pt; border-right:1px solid rgba(255,255,255,0.2) }
+  th:first-child { text-align:left }
+  td { padding:5px; border-bottom:1px solid #ddd; border-right:1px solid #ddd; vertical-align:middle; text-align:center }
+  td:first-child { text-align:left }
+  tr:nth-child(odd) { background:#f7f7f7 }
   tr.row-pending { background:#FFFDE7 !important }
   tr.row-low { background:#FFEBEE !important }
   .note { font-size:7pt; color:#999; font-style:italic; margin:3px 0 10px }
+  .kpi-wrap { display:flex; gap:0; margin-bottom:16px; margin-left:4px }
+  .kpi-wrap > div + div { border-left:none }
 `
 
 // ─── Performance Summary HTML ───────────────────────────────────────────────
@@ -288,14 +292,14 @@ function generatePerformanceSummaryHTML(
   return `<!DOCTYPE html><html><head><style>${CSS}</style></head><body>
     ${headerHTML('Performance Summary Report', logo)}
     <div style="text-align:center;font-size:22pt;font-weight:700;color:#02474E;margin:12px 0 4px">Performance Summary Report</div>
-    <div style="text-align:center;font-size:9pt;color:#666;margin-bottom:18px">Region: ${regionNames.length > 0 ? regionNames.join(', ') : 'All Regions'} | Year: ${years.join(', ')} | Months: ${monthRange}</div>
+    <div style="text-align:left;font-size:9pt;color:#666;margin-bottom:18px">Region: ${regionNames.length > 0 ? regionNames.join(', ') : 'All Regions'} | Year: ${years.join(', ')} | Months: ${monthRange}</div>
 
     ${sectionHeader('Executive Overview')}
-    <div style="display:flex;gap:10px;margin-bottom:16px">
-      ${kpiBox(`${avgScore.toFixed(1)}% <span style="color:#27AE60;font-size:12pt">▲</span>`, 'All Contractors Avg Score', 'Target: 90%', scoreColor(avgScore))}
-      ${kpiBox(`${workOrders.length}`, 'Total Work Orders', `${inspectedWOs.length} Inspected, ${pendingWOs.length} Pending`)}
-      ${kpiBox(`${uniqueContractors.size}`, 'Active Contractors')}
-      ${kpiBox(`${pendingWOs.length}`, 'Pending Inspections', `${overdueCount} Overdue (>3 days)`, '#C0392B')}
+    <div class="kpi-wrap">
+      ${kpiBox(`${avgScore.toFixed(1)}% <span style="color:#27AE60;font-size:12pt">▲</span>`, 'All Contractors Avg Score', 'Target: 90%', scoreColor(avgScore), '#02474E')}
+      ${kpiBox(`${workOrders.length}`, 'Total Work Orders', `${inspectedWOs.length} Inspected, ${pendingWOs.length} Pending`, '#02474E', '#1565C0')}
+      ${kpiBox(`${uniqueContractors.size}`, 'Active Contractors', undefined, '#27AE60', '#27AE60')}
+      ${kpiBox(`${pendingWOs.length}`, 'Pending Inspections', `${overdueCount} Overdue (>3 days)`, '#C0392B', '#E67E22')}
     </div>
 
     ${sectionHeader('Contractor Performance Ranking')}
@@ -335,14 +339,14 @@ function generatePerformanceSummaryHTML(
       const fmt = (arr: number[]) => arr.length > 0 ? scoreCell(catAvg(arr), true) : '<span style="color:#999">\u2014</span>'
       return `<tr><td><strong>${c.name}</strong></td><td>${fmt(cCats.hse)}</td><td>${fmt(cCats.tech)}</td><td>${fmt(cCats.process)}</td><td>${fmt(cCats.closure)}</td><td>${scoreCell(c.avgScore, true)}</td></tr>`
     }).join('')}
-    <tr style="background:#f0f0f0"><td><strong>ALL CONTRACTORS AVG</strong></td><td><strong>${catAvg(allCats.hse).toFixed(1)}%</strong></td><td><strong>${catAvg(allCats.tech).toFixed(1)}%</strong></td><td><strong>${catAvg(allCats.process).toFixed(1)}%</strong></td><td><strong>${catAvg(allCats.closure).toFixed(1)}%</strong></td><td><strong>${avgScore.toFixed(1)}%</strong></td></tr>
+    <tr style="background:#EBF5F7 !important"><td><strong>ALL CONTRACTORS AVG</strong></td><td><strong>${catAvg(allCats.hse).toFixed(1)}%</strong></td><td><strong>${catAvg(allCats.tech).toFixed(1)}%</strong></td><td><strong>${catAvg(allCats.process).toFixed(1)}%</strong></td><td><strong>${catAvg(allCats.closure).toFixed(1)}%</strong></td><td><strong>${avgScore.toFixed(1)}%</strong></td></tr>
     </table>
     </div>
 
     <div class="avoid-break">
     ${sectionHeader('Lowest Scoring Checklist Items (All Contractors)')}
-    <table><tr><th>#</th><th>Checklist Item</th><th>Category</th><th>Avg Score %</th></tr>
-    ${lowestItems.map((item, i) => `<tr><td>${i + 1}</td><td>${item.question}</td><td>${item.category}</td><td>${scoreCell(item.avg, true)}</td></tr>`).join('')}
+    <table><tr><th style="text-align:center">#</th><th style="text-align:left">Checklist Item</th><th style="text-align:left">Category</th><th>Avg Score %</th></tr>
+    ${lowestItems.map((item, i) => `<tr><td style="text-align:center">${i + 1}</td><td style="text-align:left">${item.question}</td><td style="text-align:left">${item.category}</td><td>${scoreCell(item.avg, true)}</td></tr>`).join('')}
     </table>
     </div>
   </body></html>`
