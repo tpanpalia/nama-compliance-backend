@@ -196,7 +196,7 @@ function sectionHeader(title: string): string {
 }
 
 function kpiBox(value: string, label: string, sub?: string, color?: string, topColor?: string): string {
-  return `<div style="flex:1;border:1px solid #ddd;border-top:4px solid ${topColor || '#02474E'};border-radius:0 0 6px 6px;padding:12px 6px;text-align:center">
+  return `<div style="flex:1;border:1px solid #ddd;border-top:8px solid ${topColor || '#02474E'};border-radius:0 0 6px 6px;padding:12px 6px;text-align:center">
     <div style="font-size:22pt;font-weight:700;color:${color || '#02474E'}">${value}</div>
     <div style="font-size:7.5pt;color:#666;margin-top:4px">${label}</div>
     ${sub ? `<div style="font-size:6.5pt;color:#999;margin-top:2px">${sub}</div>` : ''}
@@ -219,7 +219,8 @@ const CSS = `
   table { width:calc(100% - 84px); border-collapse:collapse; font-size:8pt; margin:0 48px 6px 36px; border:1px solid #ddd }
   th { background:#02474E; color:#fff; font-weight:600; padding:6px 5px; text-align:center; font-size:7.5pt; border-right:1px solid rgba(255,255,255,0.2) }
   th:first-child { text-align:left }
-  td { padding:5px; border-bottom:1px solid #ddd; border-right:1px solid #ddd; vertical-align:middle; text-align:center }
+  td { padding:5px; border-bottom:1px solid #ddd; border-right:1px solid #ddd; vertical-align:middle; text-align:center; word-break:keep-all; white-space:nowrap }
+  tr { page-break-inside:avoid; break-inside:avoid }
   td:first-child { text-align:left }
   tr:nth-child(odd) { background:#f7f7f7 }
   tr.row-pending { background:#FFFDE7 !important }
@@ -401,17 +402,17 @@ function generateContractorPerformanceHTML(
     <div style="text-align:center;font-size:22pt;font-weight:700;color:#02474E;margin:10px 0 15px">Contractor Performance Report</div>
 
     ${sectionHeader('Overview')}
-    <div style="display:flex;gap:8px;margin-bottom:14px">
-      ${kpiBox(`${avgScore.toFixed(2)}% <span style="color:#27AE60;font-size:12pt">▲</span>`, 'Avg Compliance Score', 'Target: 90%', scoreColor(avgScore))}
-      ${kpiBox(`${workOrders.length}`, 'Total Work Orders', `${inspectedWOs.length} Inspected, ${pendingWOs.length} Pending`)}
-      ${kpiBox(`${uniqueContractors.size}`, 'Contractors', crList.length > 30 ? crList.substring(0, 29) + '..' : crList)}
-      ${kpiBox(`${pendingWOs.length}`, 'Pending Inspections')}
-      ${kpiBox(`${reworkCount}`, 'Rework Orders', `out of ${inspectedWOs.length} inspected`)}
+    <div style="display:flex;gap:8px;margin:0 36px 14px 36px">
+      ${kpiBox(`${avgScore.toFixed(2)}% <span style="color:#27AE60;font-size:12pt">▲</span>`, 'Avg Compliance Score', 'Target: 90%', scoreColor(avgScore), '#02474E')}
+      ${kpiBox(`${workOrders.length}`, 'Total Work Orders', `${inspectedWOs.length} Inspected, ${pendingWOs.length} Pending`, '#02474E', '#2471A3')}
+      ${kpiBox(`${uniqueContractors.size}`, 'Contractors', crList.length > 30 ? crList.substring(0, 29) + '..' : crList, '#02474E', '#27AE60')}
+      ${kpiBox(`${pendingWOs.length}`, 'Pending Inspections', undefined, '#C0392B', '#C0392B')}
+      ${kpiBox(`${reworkCount}`, 'Rework Orders', `out of ${inspectedWOs.length} inspected`, '#C0392B', '#922B21')}
     </div>
 
     ${sectionHeader('Work Order Details')}
     <table style="font-size:7pt">
-    <tr><th>Work Order</th><th>Contractor</th><th>CR #</th><th>Site</th><th>Region</th><th>Status</th><th>Overall Score</th><th>HSE & Safety</th><th>Technical Install.</th><th>Process & Comm.</th><th>Site Closure</th><th>Rework</th><th>Duration (Days)</th><th>Inspector</th><th>Submitted</th><th>Inspected</th></tr>
+    <tr><th style="width:12%;white-space:nowrap">Work Order</th><th>Contractor</th><th>CR #</th><th>Site</th><th>Region</th><th>Status</th><th>Overall Score</th><th>HSE & Safety</th><th>Technical Install.</th><th>Process & Comm.</th><th>Site Closure</th><th>Rework</th><th>Duration (Days)</th><th>Inspector</th><th>Submitted</th><th>Inspected</th></tr>
     ${sortedWOs.map(ws => {
       const wo = ws.wo, ins = isInspected(wo), isPending = !ins, isLow = ws.overall !== null && ws.overall < 85
       const rowClass = isPending ? 'row-pending' : isLow ? 'row-low' : ''
@@ -419,7 +420,7 @@ function generateContractorPerformanceHTML(
       const days = Math.ceil(((wo.submissionDate ? new Date(wo.submissionDate).getTime() : now.getTime()) - new Date(wo.allocationDate).getTime()) / 86400000)
       const isRework = wo.status === 'IN_PROGRESS' && wo.submissionDate !== null
       return `<tr class="${rowClass}">
-        <td>${wo.id}</td><td>${wo.contractor.companyName}</td><td>${wo.contractorCr}</td><td>${wo.siteName}</td><td>${wo.governorate.nameEn}</td>
+        <td style="white-space:nowrap">${wo.id}</td><td>${wo.contractor.companyName}</td><td>${wo.contractorCr}</td><td>${wo.siteName}</td><td>${wo.governorate.nameEn}</td>
         <td style="color:${ins ? '#27AE60' : '#E67E22'};font-weight:700">${ins ? 'INSPECTED' : 'SUBMITTED'}</td>
         <td>${scoreCell(ws.overall, ins)}</td><td>${scoreCell(ws.cats.hse, ins)}</td><td>${scoreCell(ws.cats.technical, ins)}</td><td>${scoreCell(ws.cats.process, ins)}</td><td>${scoreCell(ws.cats.closure, ins)}</td>
         <td style="color:${isRework ? '#C0392B' : '#27AE60'};font-weight:700">${isRework ? 'Yes' : 'No'}</td>
