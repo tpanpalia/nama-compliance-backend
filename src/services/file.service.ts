@@ -2,7 +2,6 @@ import { FileCategory } from '@prisma/client'
 import { AppError } from '../middleware/errorHandler'
 import { fileRepository } from '../repositories/file.repository'
 import { getStorageService } from '../lib/storage'
-import { prisma } from '../lib/prisma'
 
 export const fileService = {
   presign: async (userId: string, data: {
@@ -37,51 +36,9 @@ export const fileService = {
     return { ok: true, fileId: file.id }
   },
 
-  getUrl: async (fileId: string, userId: string, userRole: string) => {
+  getUrl: async (fileId: string) => {
     const file = await fileRepository.findById(fileId)
     if (!file || file.isDeleted) throw new AppError(404, 'File not found')
-
-    // ADMIN and REGULATOR can access all files
-    if (userRole !== 'ADMIN' && userRole !== 'REGULATOR') {
-      // Check if user is the uploader
-      const isUploader = file.uploadedBy === userId
-
-      if (!isUploader) {
-        let hasAccess = false
-
-        // For INSPECTOR: allow if the file is evidence on a WO assigned to them
-        if (userRole === 'INSPECTOR') {
-          const evidenceLink = await prisma.evidence.findFirst({
-            where: { fileId: file.id },
-            include: { workOrder: { select: { assignedInspectorId: true } } },
-          })
-          if (evidenceLink?.workOrder.assignedInspectorId === userId) {
-            hasAccess = true
-          }
-        }
-
-        // For CONTRACTOR: allow if the file is evidence on a WO belonging to them
-        if (userRole === 'CONTRACTOR') {
-          const evidenceLink = await prisma.evidence.findFirst({
-            where: { fileId: file.id },
-            include: { workOrder: { select: { contractorCr: true } } },
-          })
-          if (evidenceLink) {
-            const contractorProfile = await prisma.contractorProfile.findFirst({
-              where: { userId },
-              select: { crNumber: true },
-            })
-            if (contractorProfile && evidenceLink.workOrder.contractorCr === contractorProfile.crNumber) {
-              hasAccess = true
-            }
-          }
-        }
-
-        if (!hasAccess) {
-          throw new AppError(403, 'You do not have access to this file')
-        }
-      }
-    }
 
     try {
       const storage = getStorageService()

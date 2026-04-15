@@ -27,7 +27,7 @@ export const confirm = async (req: Request, res: Response, next: NextFunction) =
 
 export const getUrl = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const result = await fileService.getUrl(req.params.id, req.user!.userId, req.user!.role)
+    const result = await fileService.getUrl(req.params.id)
     res.json(result)
   } catch (err) { next(err) }
 }
