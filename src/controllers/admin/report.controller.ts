@@ -52,3 +52,4 @@ export const generate = async (req: Request, res: Response, next: NextFunction) 
     res.send(result.buffer)
   } catch (err) { next(err) }
 }
+

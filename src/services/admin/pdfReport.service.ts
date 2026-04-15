@@ -74,9 +74,18 @@ const CATEGORY_LABELS: Record<string, string> = { HSE: 'HSE & Safety', TECH: 'Te
 interface WOScore { wo: WorkOrderWithRelations; overall: number | null; cats: ReturnType<typeof computeCategoryScores> }
 function computeAllScores(wos: WorkOrderWithRelations[]): WOScore[] {
   return wos.map(wo => {
-    if (wo.inspection && wo.inspection.responses.length > 0) {
-      const cats = computeCategoryScores(wo.inspection.responses)
-      return { wo, overall: computeOverallScore(cats, wo.scoringWeights), cats }
+    if (wo.inspection && wo.inspection.status === 'SUBMITTED' && wo.inspection.finalScore != null) {
+      // Use stored scores from DB (calculated with proper weights at submission time)
+      return {
+        wo,
+        overall: Number(wo.inspection.finalScore),
+        cats: {
+          hse: wo.inspection.hseScore != null ? Number(wo.inspection.hseScore) : null,
+          technical: wo.inspection.technicalScore != null ? Number(wo.inspection.technicalScore) : null,
+          process: wo.inspection.processScore != null ? Number(wo.inspection.processScore) : null,
+          closure: wo.inspection.closureScore != null ? Number(wo.inspection.closureScore) : null,
+        },
+      }
     }
     return { wo, overall: null, cats: { hse: null, technical: null, process: null, closure: null } }
   })
@@ -133,7 +142,7 @@ function lineChartSVG(data: { label: string; value: number | null }[], targetLin
   for (const idx of validIdxs) {
     const x = toX(idx), y = toY(data[idx].value!)
     svg += `<circle cx="${x}" cy="${y}" r="4" fill="#02474E"/>`
-    svg += `<text x="${x}" y="${y - 8}" text-anchor="middle" font-size="7.5" font-weight="bold" fill="#02474E">${data[idx].value!.toFixed(1)}%</text>`
+    svg += `<text x="${x}" y="${y - 8}" text-anchor="middle" font-size="7.5" font-weight="bold" fill="#02474E">${data[idx].value!.toFixed(2)}%</text>`
   }
 
   svg += '</svg>'
@@ -167,7 +176,7 @@ function verticalBarChartSVG(buckets: { label: string; count: number; color: str
 
 function scoreCell(score: number | null, ins: boolean): string {
   if (!ins || score === null) return '<span style="color:#999">\u2014</span>'
-  return `<span style="background:${scoreBg(score)};color:${scoreColor(score)};font-weight:700;padding:2px 6px;border-radius:3px;display:inline-block;min-width:40px;text-align:center">${score.toFixed(1)}%</span>`
+  return `<span style="background:${scoreBg(score)};color:${scoreColor(score)};font-weight:700;padding:2px 6px;border-radius:3px;display:inline-block;min-width:40px;text-align:center">${score.toFixed(2)}%</span>`
 }
 
 function headerHTML(reportType: string, logo: string): string {
@@ -198,7 +207,7 @@ function horizontalBar(label: string, value: number): string {
   return `<div style="display:flex;align-items:center;margin-bottom:5px">
     <div style="width:170px;font-size:9pt">${label}</div>
     <div style="flex:1;height:18px;background:#eee;border-radius:3px;overflow:hidden;margin-right:8px"><div style="height:100%;width:${Math.min(value, 100)}%;background:${scoreColor(value)};border-radius:3px"></div></div>
-    <div style="width:50px;font-size:9pt;font-weight:700;text-align:right;color:${scoreColor(value)}">${value.toFixed(1)}%</div>
+    <div style="width:50px;font-size:9pt;font-weight:700;text-align:right;color:${scoreColor(value)}">${value.toFixed(2)}%</div>
   </div>`
 }
 
@@ -225,12 +234,15 @@ const CSS = `
 function generatePerformanceSummaryHTML(
   workOrders: WorkOrderWithRelations[], regionNames: string[],
   years: number[], months: number[], logo: string,
-  checklistItemMap: Map<string, { question: string; category: string }>
+  checklistItemMap: Map<string, { question: string; category: string }>,
+  cachedScores: Map<string, { avgScore: number | null; totalInspections: number }>
 ): string {
   const woScores = computeAllScores(workOrders)
-  const inspectedWOs = workOrders.filter(isInspected)
-  const pendingWOs = workOrders.filter(wo => !isInspected(wo))
+  const inspectedWOs = workOrders.filter(wo => wo.status === 'INSPECTION_COMPLETED')
+  const pendingWOs = workOrders.filter(wo => ['SUBMITTED', 'PENDING_INSPECTION', 'INSPECTION_IN_PROGRESS', 'OVERDUE'].includes(wo.status))
   const scoredWOs = woScores.filter(ws => ws.overall !== null)
+
+  // WO-level average for KPI box (matches dashboard)
   const avgScore = scoredWOs.length > 0 ? scoredWOs.reduce((s, ws) => s + (ws.overall ?? 0), 0) / scoredWOs.length : 0
 
   const contractorMap = new Map<string, { name: string; cr: string; wos: WOScore[]; total: number }>()
@@ -241,8 +253,8 @@ function generatePerformanceSummaryHTML(
   }
   const contractors = Array.from(contractorMap.values()).map(c => {
     const scored = c.wos.filter(ws => ws.overall !== null)
-    const avg = scored.length > 0 ? scored.reduce((s, ws) => s + (ws.overall ?? 0), 0) / scored.length : 0
-    return { ...c, avgScore: avg, inspected: scored.length, pending: c.total - scored.length }
+    const periodAvg = scored.length > 0 ? scored.reduce((s, ws) => s + (ws.overall ?? 0), 0) / scored.length : 0
+    return { ...c, avgScore: periodAvg, periodAvg, inspected: scored.length, pending: c.total - scored.length }
   }).sort((a, b) => b.avgScore - a.avgScore)
 
   const uniqueContractors = new Set(workOrders.map(w => w.contractorCr))
@@ -284,7 +296,7 @@ function generatePerformanceSummaryHTML(
 
   // Lowest scoring items
   const itemScores = new Map<string, number[]>()
-  for (const ws of woScores) { if (!ws.wo.inspection) continue; for (const r of ws.wo.inspection.responses) { const s = ratingToScore(r.rating); if (s === null) continue; if (!itemScores.has(r.checklistItemId)) itemScores.set(r.checklistItemId, []); itemScores.get(r.checklistItemId)!.push(s) } }
+  for (const ws of woScores) { if (!ws.wo.inspection || ws.wo.inspection.status !== 'SUBMITTED') continue; for (const r of ws.wo.inspection.responses) { const s = ratingToScore(r.rating); if (s === null) continue; if (!itemScores.has(r.checklistItemId)) itemScores.set(r.checklistItemId, []); itemScores.get(r.checklistItemId)!.push(s) } }
   const lowestItems = Array.from(itemScores.entries())
     .map(([id, scores]) => ({ id, question: checklistItemMap.get(id)?.question ?? id, category: CATEGORY_LABELS[checklistItemMap.get(id)?.category ?? ''] ?? '', avg: scores.reduce((a, b) => a + b, 0) / scores.length }))
     .sort((a, b) => a.avg - b.avg).slice(0, 5)
@@ -296,7 +308,7 @@ function generatePerformanceSummaryHTML(
 
     ${sectionHeader('Executive Overview')}
     <div class="kpi-wrap">
-      ${kpiBox(`${avgScore.toFixed(1)}% <span style="color:#27AE60;font-size:12pt">▲</span>`, 'All Contractors Avg Score', 'Target: 90%', scoreColor(avgScore), '#02474E')}
+      ${kpiBox(`${avgScore.toFixed(2)}% <span style="color:#27AE60;font-size:12pt">▲</span>`, 'All Contractors Avg Score', 'Target: 90%', scoreColor(avgScore), '#02474E')}
       ${kpiBox(`${workOrders.length}`, 'Total Work Orders', `${inspectedWOs.length} Inspected, ${pendingWOs.length} Pending`, '#02474E', '#1565C0')}
       ${kpiBox(`${uniqueContractors.size}`, 'Active Contractors', undefined, '#27AE60', '#27AE60')}
       ${kpiBox(`${pendingWOs.length}`, 'Pending Inspections', `${overdueCount} Overdue (>3 days)`, '#C0392B', '#E67E22')}
@@ -332,15 +344,24 @@ function generatePerformanceSummaryHTML(
 
     <div class="avoid-break">
     ${sectionHeader('Per-Category Comparison by Contractor')}
-    <table><tr><th>Contractor</th><th>HSE & Safety</th><th>Technical Installation</th><th>Process & Communication</th><th>Site Closure</th><th>Overall</th></tr>
-    ${contractors.map(c => {
-      const cCats = { hse: [] as number[], tech: [] as number[], process: [] as number[], closure: [] as number[] }
-      for (const ws of c.wos) { if (ws.cats.hse !== null) cCats.hse.push(ws.cats.hse); if (ws.cats.technical !== null) cCats.tech.push(ws.cats.technical); if (ws.cats.process !== null) cCats.process.push(ws.cats.process); if (ws.cats.closure !== null) cCats.closure.push(ws.cats.closure) }
-      const fmt = (arr: number[]) => arr.length > 0 ? scoreCell(catAvg(arr), true) : '<span style="color:#999">\u2014</span>'
-      return `<tr><td><strong>${c.name}</strong></td><td>${fmt(cCats.hse)}</td><td>${fmt(cCats.tech)}</td><td>${fmt(cCats.process)}</td><td>${fmt(cCats.closure)}</td><td>${scoreCell(c.avgScore, true)}</td></tr>`
-    }).join('')}
-    <tr style="background:#EBF5F7 !important"><td><strong>ALL CONTRACTORS AVG</strong></td><td><strong>${catAvg(allCats.hse).toFixed(1)}%</strong></td><td><strong>${catAvg(allCats.tech).toFixed(1)}%</strong></td><td><strong>${catAvg(allCats.process).toFixed(1)}%</strong></td><td><strong>${catAvg(allCats.closure).toFixed(1)}%</strong></td><td><strong>${avgScore.toFixed(1)}%</strong></td></tr>
-    </table>
+    ${(() => {
+      const contractorCatAvgs = { hse: [] as number[], tech: [] as number[], process: [] as number[], closure: [] as number[], overall: [] as number[] }
+      const rows = contractors.map(c => {
+        const cCats = { hse: [] as number[], tech: [] as number[], process: [] as number[], closure: [] as number[] }
+        for (const ws of c.wos) { if (ws.cats.hse !== null) cCats.hse.push(ws.cats.hse); if (ws.cats.technical !== null) cCats.tech.push(ws.cats.technical); if (ws.cats.process !== null) cCats.process.push(ws.cats.process); if (ws.cats.closure !== null) cCats.closure.push(ws.cats.closure) }
+        if (cCats.hse.length > 0) contractorCatAvgs.hse.push(catAvg(cCats.hse))
+        if (cCats.tech.length > 0) contractorCatAvgs.tech.push(catAvg(cCats.tech))
+        if (cCats.process.length > 0) contractorCatAvgs.process.push(catAvg(cCats.process))
+        if (cCats.closure.length > 0) contractorCatAvgs.closure.push(catAvg(cCats.closure))
+        if (c.inspected > 0) contractorCatAvgs.overall.push(c.periodAvg)
+        const fmt = (arr: number[]) => arr.length > 0 ? scoreCell(catAvg(arr), true) : '<span style="color:#999">\u2014</span>'
+        return `<tr><td><strong>${c.name}</strong></td><td>${fmt(cCats.hse)}</td><td>${fmt(cCats.tech)}</td><td>${fmt(cCats.process)}</td><td>${fmt(cCats.closure)}</td><td>${c.inspected > 0 ? scoreCell(c.periodAvg, true) : '<span style="color:#999">\u2014</span>'}</td></tr>`
+      }).join('')
+      return `<table><tr><th>Contractor</th><th>HSE & Safety</th><th>Technical Installation</th><th>Process & Communication</th><th>Site Closure</th><th>Overall</th></tr>
+      ${rows}
+      <tr style="background:#EBF5F7 !important"><td><strong>ALL CONTRACTORS AVG</strong></td><td><strong>${catAvg(contractorCatAvgs.hse).toFixed(2)}%</strong></td><td><strong>${catAvg(contractorCatAvgs.tech).toFixed(2)}%</strong></td><td><strong>${catAvg(contractorCatAvgs.process).toFixed(2)}%</strong></td><td><strong>${catAvg(contractorCatAvgs.closure).toFixed(2)}%</strong></td><td><strong>${contractorCatAvgs.overall.length > 0 ? catAvg(contractorCatAvgs.overall).toFixed(2) : '0.00'}%</strong></td></tr>
+      </table>`
+    })()}
     </div>
 
     <div class="avoid-break">
@@ -381,7 +402,7 @@ function generateContractorPerformanceHTML(
 
     ${sectionHeader('Overview')}
     <div style="display:flex;gap:8px;margin-bottom:14px">
-      ${kpiBox(`${avgScore.toFixed(1)}% <span style="color:#27AE60;font-size:12pt">▲</span>`, 'Avg Compliance Score', 'Target: 90%', scoreColor(avgScore))}
+      ${kpiBox(`${avgScore.toFixed(2)}% <span style="color:#27AE60;font-size:12pt">▲</span>`, 'Avg Compliance Score', 'Target: 90%', scoreColor(avgScore))}
       ${kpiBox(`${workOrders.length}`, 'Total Work Orders', `${inspectedWOs.length} Inspected, ${pendingWOs.length} Pending`)}
       ${kpiBox(`${uniqueContractors.size}`, 'Contractors', crList.length > 30 ? crList.substring(0, 29) + '..' : crList)}
       ${kpiBox(`${pendingWOs.length}`, 'Pending Inspections')}
@@ -420,7 +441,7 @@ function generateContractorPerformanceHTML(
 
 // ─── Main Export ────────────────────────────────────────────────────────────
 
-export async function generateReport(params: ReportParams): Promise<Buffer> {
+async function buildReportHTML(params: ReportParams): Promise<{ html: string; isLandscape: boolean }> {
   const { reportType, regions, contractors, years, months } = params
   const govCodes = regions ?? [], crCodes = contractors ?? [], activeMonths = months ?? []
   const startMonth = activeMonths.length ? String(Math.min(...activeMonths)).padStart(2, '0') : '01'
@@ -443,6 +464,12 @@ export async function generateReport(params: ReportParams): Promise<Buffer> {
   const checklistItems = await prisma.checklistItem.findMany({ where: { isActive: true }, select: { id: true, question: true, category: true } })
   const checklistItemMap = new Map(checklistItems.map(ci => [ci.id, { question: ci.question, category: ci.category }]))
 
+  // Fetch cached contractor scores
+  const contractorProfiles = await prisma.contractorProfile.findMany({
+    select: { crNumber: true, avgScore: true, totalInspections: true },
+  })
+  const cachedScores = new Map(contractorProfiles.map(cp => [cp.crNumber, { avgScore: cp.avgScore ? Number(cp.avgScore) : null, totalInspections: cp.totalInspections }]))
+
   let regionNames: string[] = []
   if (govCodes.length > 0) { regionNames = (await prisma.governorate.findMany({ where: { code: { in: govCodes } }, select: { nameEn: true } })).map(g => g.nameEn) }
 
@@ -450,10 +477,15 @@ export async function generateReport(params: ReportParams): Promise<Buffer> {
   const isLandscape = reportType === 'contractor-performance'
 
   const html = reportType === 'performance-summary'
-    ? generatePerformanceSummaryHTML(workOrders, regionNames, years, activeMonths, logo, checklistItemMap)
+    ? generatePerformanceSummaryHTML(workOrders, regionNames, years, activeMonths, logo, checklistItemMap, cachedScores)
     : generateContractorPerformanceHTML(workOrders, years, activeMonths, logo)
 
-  // Use @sparticuz/chromium for serverless (Vercel), fall back to local Chrome for dev
+  return { html, isLandscape }
+}
+
+export async function generateReport(params: ReportParams): Promise<Buffer> {
+  const { html, isLandscape } = await buildReportHTML(params)
+
   const isServerless = !!process.env.AWS_LAMBDA_FUNCTION_NAME || !!process.env.VERCEL
   const browser = await puppeteerCore.launch({
     args: isServerless ? chromium.args : ['--no-sandbox', '--disable-setuid-sandbox'],

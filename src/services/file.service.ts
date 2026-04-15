@@ -47,8 +47,9 @@ export const fileService = {
       const isUploader = file.uploadedBy === userId
 
       if (!isUploader) {
-        // For INSPECTOR: also allow if the file is evidence on a WO assigned to them
         let hasAccess = false
+
+        // For INSPECTOR: allow if the file is evidence on a WO assigned to them
         if (userRole === 'INSPECTOR') {
           const evidenceLink = await prisma.evidence.findFirst({
             where: { fileId: file.id },
@@ -56,6 +57,23 @@ export const fileService = {
           })
           if (evidenceLink?.workOrder.assignedInspectorId === userId) {
             hasAccess = true
+          }
+        }
+
+        // For CONTRACTOR: allow if the file is evidence on a WO belonging to them
+        if (userRole === 'CONTRACTOR') {
+          const evidenceLink = await prisma.evidence.findFirst({
+            where: { fileId: file.id },
+            include: { workOrder: { select: { contractorCr: true } } },
+          })
+          if (evidenceLink) {
+            const contractorProfile = await prisma.contractorProfile.findFirst({
+              where: { userId },
+              select: { crNumber: true },
+            })
+            if (contractorProfile && evidenceLink.workOrder.contractorCr === contractorProfile.crNumber) {
+              hasAccess = true
+            }
           }
         }
 
