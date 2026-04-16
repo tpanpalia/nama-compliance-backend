@@ -421,7 +421,7 @@ function generateContractorPerformanceHTML(
       const isRework = wo.status === 'IN_PROGRESS' && wo.submissionDate !== null
       return `<tr class="${rowClass}">
         <td style="white-space:nowrap">${wo.id}</td><td>${wo.contractor.companyName}</td><td>${wo.contractorCr}</td><td>${wo.siteName}</td><td>${wo.governorate.nameEn}</td>
-        <td style="color:${ins ? '#27AE60' : '#E67E22'};font-weight:700">${ins ? 'INSPECTED' : 'SUBMITTED'}</td>
+        <td style="color:${ins ? '#27AE60' : wo.status === 'IN_PROGRESS' ? '#2471A3' : wo.status === 'INSPECTION_IN_PROGRESS' ? '#8E44AD' : wo.status === 'OVERDUE' ? '#C0392B' : '#E67E22'};font-weight:700">${ins ? 'INSPECTED' : wo.status === 'IN_PROGRESS' ? 'IN PROGRESS' : wo.status === 'PENDING_INSPECTION' ? 'PENDING INSPECTION' : wo.status === 'INSPECTION_IN_PROGRESS' ? 'INSPECTION IN PROGRESS' : wo.status === 'OVERDUE' ? 'OVERDUE' : wo.status === 'ASSIGNED' ? 'ASSIGNED' : 'SUBMITTED'}</td>
         <td>${scoreCell(ws.overall, ins)}</td><td>${scoreCell(ws.cats.hse, ins)}</td><td>${scoreCell(ws.cats.technical, ins)}</td><td>${scoreCell(ws.cats.process, ins)}</td><td>${scoreCell(ws.cats.closure, ins)}</td>
         <td style="color:${isRework ? '#C0392B' : '#27AE60'};font-weight:700">${isRework ? 'Yes' : 'No'}</td>
         <td style="color:${durationColor(days)}">${days}</td><td>${inspectorName}</td>
@@ -430,11 +430,11 @@ function generateContractorPerformanceHTML(
     }).join('')}
     </table>
 
-    <div style="display:flex;gap:16px;flex-wrap:wrap;font-size:7pt;color:#666;margin-top:6px;padding:8px;background:#f9f9f9;border-radius:4px">
-      <div style="display:flex;align-items:center;gap:4px"><div style="width:12px;height:10px;background:#E8F5E9;border-radius:2px"></div> Score ≥ 90%</div>
-      <div style="display:flex;align-items:center;gap:4px"><div style="width:12px;height:10px;background:#FFF3E0;border-radius:2px"></div> Score 75–89%</div>
-      <div style="display:flex;align-items:center;gap:4px"><div style="width:12px;height:10px;background:#FFEBEE;border-radius:2px"></div> Score &lt; 75%</div>
-      <div>Duration: ≤7d / 8–10d / &gt;10d</div>
+    <div style="display:flex;align-items:center;justify-content:center;gap:24px;flex-wrap:wrap;font-size:7pt;color:#666;margin-top:6px;padding:8px;background:#f9f9f9;border-radius:4px">
+      <div style="display:flex;align-items:center;gap:4px"><div style="width:10px;height:10px;background:#27AE60;border-radius:2px"></div> Score ≥ 90%</div>
+      <div style="display:flex;align-items:center;gap:4px"><div style="width:10px;height:10px;background:#E67E22;border-radius:2px"></div> Score 75–89%</div>
+      <div style="display:flex;align-items:center;gap:4px"><div style="width:10px;height:10px;background:#C0392B;border-radius:2px"></div> Score &lt; 75%</div>
+      <div style="display:flex;align-items:center;gap:4px">Duration: <span style="color:#27AE60;font-weight:700">≤7d</span> / <span style="color:#E67E22;font-weight:700">8–10d</span> / <span style="color:#C0392B;font-weight:700">&gt;10d</span></div>
       <div>Yellow rows = Pending | Red rows = Below 85%</div>
     </div>
   </body></html>`
