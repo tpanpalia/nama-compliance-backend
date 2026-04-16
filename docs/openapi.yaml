@@ -758,13 +758,14 @@ paths:
         - { $ref: '#/components/parameters/Id' }
       responses:
         '200':
-          description: Signed URL
+          description: Signed URL for full-size file and optional thumbnail
           content:
             application/json:
               schema:
                 type: object
                 properties:
-                  url:             { type: string }
+                  url:              { type: string, description: Full-size presigned URL }
+                  thumbnailUrl:     { type: string, nullable: true, description: 200x200 thumbnail URL (images only, null for videos) }
                   expiresInSeconds: { type: integer, example: 3600 }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/NotFound' }
