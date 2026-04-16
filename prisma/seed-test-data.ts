@@ -373,17 +373,17 @@ async function main() {
     // SUBMITTED (3) — contractor uploaded all evidence
     { daysBack: 15, targetDays: 25, status: WorkOrderStatus.SUBMITTED, inspStatus: null, hasScores: false, evidenceCount: 14 },
     { daysBack: 14, targetDays: 20, status: WorkOrderStatus.SUBMITTED, inspStatus: null, hasScores: false, evidenceCount: 14 },
-    { daysBack: 16, targetDays: 30, status: WorkOrderStatus.SUBMITTED, inspStatus: null, hasScores: false, evidenceCount: 10 },
+    { daysBack: 16, targetDays: 30, status: WorkOrderStatus.SUBMITTED, inspStatus: null, hasScores: false, evidenceCount: 14 },
 
     // PENDING_INSPECTION (3) — full contractor evidence, inspection not started
     { daysBack: 20, targetDays: 30, status: WorkOrderStatus.PENDING_INSPECTION, inspStatus: InspectionStatus.PENDING, hasScores: false, evidenceCount: 14 },
     { daysBack: 18, targetDays: 25, status: WorkOrderStatus.PENDING_INSPECTION, inspStatus: InspectionStatus.PENDING, hasScores: false, evidenceCount: 14 },
-    { daysBack: 22, targetDays: 30, status: WorkOrderStatus.PENDING_INSPECTION, inspStatus: InspectionStatus.PENDING, hasScores: false, evidenceCount: 10 },
+    { daysBack: 22, targetDays: 30, status: WorkOrderStatus.PENDING_INSPECTION, inspStatus: InspectionStatus.PENDING, hasScores: false, evidenceCount: 14 },
 
     // INSPECTION_IN_PROGRESS (3) — inspector actively inspecting
     { daysBack: 25, targetDays: 35, status: WorkOrderStatus.INSPECTION_IN_PROGRESS, inspStatus: InspectionStatus.IN_PROGRESS, hasScores: false, evidenceCount: 14 },
     { daysBack: 23, targetDays: 30, status: WorkOrderStatus.INSPECTION_IN_PROGRESS, inspStatus: InspectionStatus.IN_PROGRESS, hasScores: false, evidenceCount: 14 },
-    { daysBack: 27, targetDays: 35, status: WorkOrderStatus.INSPECTION_IN_PROGRESS, inspStatus: InspectionStatus.IN_PROGRESS, hasScores: false, evidenceCount: 8 },
+    { daysBack: 27, targetDays: 35, status: WorkOrderStatus.INSPECTION_IN_PROGRESS, inspStatus: InspectionStatus.IN_PROGRESS, hasScores: false, evidenceCount: 14 },
 
     // INSPECTION_COMPLETED (3) — full scores, full evidence
     { daysBack: 40, targetDays: 30, status: WorkOrderStatus.INSPECTION_COMPLETED, inspStatus: InspectionStatus.SUBMITTED, hasScores: true, evidenceCount: 14 },
