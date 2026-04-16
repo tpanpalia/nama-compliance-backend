@@ -80,16 +80,56 @@ export const inspectionRepository = {
   update: (id: string, data: Parameters<typeof prisma.inspection.update>[0]['data']) =>
     prisma.inspection.update({ where: { id }, data }),
 
-  updateResponses: (inspectionId: string, responses: { checklistItemId: string; rating?: string | null; inspectorComments?: string | null }[]) =>
-    prisma.$transaction(
+  updateResponses: async (inspectionId: string, responses: { checklistItemId: string; rating?: string | null; inspectorComments?: string | null }[]) => {
+    // Fetch question text for any items that may need to be created
+    const itemIds = responses.map((r) => r.checklistItemId)
+    const items = await prisma.checklistItem.findMany({
+      where: { id: { in: itemIds } },
+      select: { id: true, question: true },
+    })
+    const questionMap = new Map(items.map((i) => [i.id, i.question]))
+
+    return prisma.$transaction(
       responses.map((r) =>
-        prisma.inspectionResponse.updateMany({
-          where: { inspectionId, checklistItemId: r.checklistItemId },
-          data: {
-            ...(r.rating !== undefined && r.rating !== null ? { rating: r.rating as Parameters<typeof prisma.inspectionResponse.updateMany>[0]['data']['rating'] } : {}),
+        prisma.inspectionResponse.upsert({
+          where: { inspectionId_checklistItemId: { inspectionId, checklistItemId: r.checklistItemId } },
+          update: {
+            ...(r.rating !== undefined && r.rating !== null ? { rating: r.rating as Parameters<typeof prisma.inspectionResponse.update>[0]['data']['rating'] } : {}),
+            ...(r.inspectorComments !== undefined ? { inspectorComments: r.inspectorComments } : {}),
+          },
+          create: {
+            inspectionId,
+            checklistItemId:  r.checklistItemId,
+            questionSnapshot: questionMap.get(r.checklistItemId) ?? '',
+            ...(r.rating !== undefined && r.rating !== null ? { rating: r.rating as Parameters<typeof prisma.inspectionResponse.create>[0]['data']['rating'] } : {}),
             ...(r.inspectorComments !== undefined ? { inspectorComments: r.inspectorComments } : {}),
           },
         }),
       ),
-    ),
+    )
+  },
+
+  ensureResponses: async (inspectionId: string) => {
+    const existing = await prisma.inspectionResponse.findMany({
+      where: { inspectionId },
+      select: { checklistItemId: true },
+    })
+    const existingIds = new Set(existing.map((r) => r.checklistItemId))
+
+    const allItems = await prisma.checklistItem.findMany({
+      where: { isActive: true },
+      orderBy: [{ category: 'asc' }, { order: 'asc' }],
+    })
+
+    const missing = allItems.filter((item) => !existingIds.has(item.id))
+    if (missing.length === 0) return
+
+    await prisma.inspectionResponse.createMany({
+      data: missing.map((item) => ({
+        inspectionId,
+        checklistItemId:  item.id,
+        questionSnapshot: item.question,
+      })),
+    })
+  },
 }

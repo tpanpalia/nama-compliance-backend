@@ -513,11 +513,12 @@ async function main() {
 
   let scoreIdx = 0
   for (const wo of createdWorkOrders) {
-    if (wo.config.inspStatus !== InspectionStatus.IN_PROGRESS && wo.config.inspStatus !== InspectionStatus.SUBMITTED) continue
+    if (!wo.config.inspStatus) continue
 
     const inspection = await prisma.inspection.findUnique({ where: { workOrderId: wo.id } })
     if (!inspection) continue
 
+    const isPending = wo.config.inspStatus === InspectionStatus.PENDING
     const scoreTemplate = wo.config.hasScores ? scoreTemplates[scoreIdx % scoreTemplates.length] : null
     const categoryScoreMap: Record<string, number> = {
       HSE: scoreTemplate?.hse ?? 70,
@@ -528,8 +529,8 @@ async function main() {
 
     for (const item of checklistItems) {
       const catScore = categoryScoreMap[item.category] ?? 70
-      const rating = getRatingForScore(catScore + randomBetween(-15, 15))
-      const comments = inspectorComments[rating]
+      const rating = isPending ? null : getRatingForScore(catScore + randomBetween(-15, 15))
+      const comments = rating ? inspectorComments[rating] : []
 
       await prisma.inspectionResponse.create({
         data: {
@@ -537,12 +538,12 @@ async function main() {
           checklistItemId: item.id,
           questionSnapshot: item.question,
           rating,
-          inspectorComments: randomElement(comments),
+          inspectorComments: rating ? randomElement(comments) : null,
         },
       })
       responseCount++
     }
-    scoreIdx++
+    if (!isPending) scoreIdx++
   }
   console.log(`   ✓ ${responseCount} responses\n`)
 

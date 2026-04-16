@@ -41,6 +41,8 @@ export const inspectorInspectionService = {
       throw new AppError(400, `Inspection is already ${inspection.status}`)
     }
 
+    await inspectionRepository.ensureResponses(inspectionId)
+
     await prisma.$transaction([
       prisma.inspection.update({ where: { id: inspectionId }, data: { status: 'IN_PROGRESS' } }),
       prisma.workOrder.update({ where: { id: inspection.workOrder.id }, data: { status: 'INSPECTION_IN_PROGRESS' } }),
@@ -94,6 +96,9 @@ export const inspectorInspectionService = {
       throw new AppError(400, 'Inspection must be IN_PROGRESS to submit')
     }
 
+    if (inspection.responses.length === 0) {
+      throw new AppError(400, 'No checklist responses found. Please complete the checklist before submitting.')
+    }
     const unrated = inspection.responses.filter((r) => !r.rating)
     if (unrated.length > 0) {
       throw new AppError(400, `${unrated.length} checklist item(s) have no rating. Complete all items before submitting.`)
