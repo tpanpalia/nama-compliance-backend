@@ -2,9 +2,6 @@ import { prisma } from '../lib/prisma'
 import { Prisma } from '@prisma/client'
 
 export const inspectionRepository = {
-  findById: (id: string) =>
-    prisma.inspection.findUnique({ where: { id } }),
-
   findByIdWithWorkOrder: (id: string) =>
     prisma.inspection.findUnique({
       where:   { id },
@@ -73,12 +70,6 @@ export const inspectionRepository = {
 
   count: (where: Prisma.InspectionWhereInput) =>
     prisma.inspection.count({ where }),
-
-  create: (data: Parameters<typeof prisma.inspection.create>[0]['data']) =>
-    prisma.inspection.create({ data }),
-
-  update: (id: string, data: Parameters<typeof prisma.inspection.update>[0]['data']) =>
-    prisma.inspection.update({ where: { id }, data }),
 
   updateResponses: async (inspectionId: string, responses: { checklistItemId: string; rating?: string | null; inspectorComments?: string | null }[]) => {
     // Fetch question text for any items that may need to be created

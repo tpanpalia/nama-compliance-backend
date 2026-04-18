@@ -65,12 +65,6 @@ export const accessRequestRepository = {
       data: { verificationStatus },
     }),
 
-  findApprovedByEmail: (email: string) =>
-    prisma.accessRequest.findFirst({
-      where: { email, status: 'APPROVED' },
-      orderBy: { requestDate: 'desc' },
-    }),
-
   updateStatusByEmail: (email: string, fromStatus: 'APPROVED' | 'DEACTIVATED', toStatus: 'APPROVED' | 'DEACTIVATED', reviewedBy: string) =>
     prisma.accessRequest.updateMany({
       where: { email, status: fromStatus },

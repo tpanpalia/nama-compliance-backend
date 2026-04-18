@@ -10,6 +10,7 @@ export interface JwtPayload {
 
 export interface RefreshPayload {
   userId: string
+  tokenVersion: number
 }
 
 export function signAccessToken(payload: JwtPayload): string {

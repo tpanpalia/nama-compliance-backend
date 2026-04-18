@@ -15,7 +15,7 @@ export const list = async (req: Request, res: Response, next: NextFunction) => {
 
 export const getById = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const result = await inspectorWorkOrderService.getById(req.params.id)
+    const result = await inspectorWorkOrderService.getById(req.user!.userId, req.params.id)
     res.json(result)
   } catch (err) { next(err) }
 }

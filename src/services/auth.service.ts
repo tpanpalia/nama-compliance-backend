@@ -7,6 +7,47 @@ import { generateRequestId } from '../utils/ids'
 import { accessRequestRepository } from '../repositories/accessRequest.repository'
 import { prisma } from '../lib/prisma'
 import { sendOtpEmail } from '../lib/email'
+import { invalidateTokenCache } from '../middleware/auth'
+
+// ── Per-email OTP brute-force protection ────────────────────────
+const OTP_MAX_ATTEMPTS = 5
+const OTP_LOCKOUT_MS = 15 * 60 * 1000 // 15 minutes
+const otpFailures = new Map<string, { attempts: number; lockedUntil: number | null }>()
+
+// Clean up expired entries every 10 minutes
+setInterval(() => {
+  const now = Date.now()
+  for (const [key, val] of otpFailures) {
+    if (val.lockedUntil && val.lockedUntil < now) otpFailures.delete(key)
+  }
+}, 10 * 60 * 1000).unref()
+
+function checkOtpLockout(email: string): void {
+  const entry = otpFailures.get(email)
+  if (!entry) return
+  if (entry.lockedUntil && entry.lockedUntil > Date.now()) {
+    const minutesLeft = Math.ceil((entry.lockedUntil - Date.now()) / 60000)
+    throw new AppError(423, `Too many failed OTP attempts. Try again in ${minutesLeft} minute(s).`)
+  }
+}
+
+function recordOtpFailure(email: string): void {
+  const entry = otpFailures.get(email) ?? { attempts: 0, lockedUntil: null }
+  entry.attempts += 1
+  if (entry.attempts >= OTP_MAX_ATTEMPTS) {
+    entry.lockedUntil = Date.now() + OTP_LOCKOUT_MS
+    // Also invalidate the OTP so it can't be retried after lockout
+    prisma.passwordResetOtp.updateMany({
+      where: { email, used: false },
+      data: { used: true },
+    }).catch(() => {})
+  }
+  otpFailures.set(email, entry)
+}
+
+function clearOtpFailures(email: string): void {
+  otpFailures.delete(email)
+}
 
 export const authService = {
   login: async (email: string, password: string) => {
@@ -53,7 +94,7 @@ export const authService = {
 
     const payload      = { userId: user.id, role: user.role, email: user.email, tokenVersion: user.tokenVersion }
     const accessToken  = signAccessToken(payload)
-    const refreshToken = signRefreshToken({ userId: user.id })
+    const refreshToken = signRefreshToken({ userId: user.id, tokenVersion: user.tokenVersion })
 
     const profile = user.contractorProfile ?? user.staffProfile ?? user.regulatorProfile ?? null
 
@@ -68,6 +109,11 @@ export const authService = {
     const decoded = verifyRefreshToken(refreshToken)
     const user    = await userRepository.findById(decoded.userId)
     if (!user || user.status !== 'ACTIVE') throw new AppError(401, 'Invalid refresh token')
+
+    // Reject refresh tokens issued before a password change/reset
+    if (decoded.tokenVersion !== user.tokenVersion) {
+      throw new AppError(401, 'Token has been revoked. Please log in again.')
+    }
 
     const accessToken = signAccessToken({ userId: user.id, role: user.role, email: user.email, tokenVersion: user.tokenVersion })
     return { accessToken }
@@ -160,6 +206,7 @@ export const authService = {
       where: { id: userId },
       data: { passwordHash: hash, tokenVersion: { increment: 1 } },
     })
+    invalidateTokenCache(userId)
     return { message: 'Password updated' }
   },
 
@@ -196,20 +243,32 @@ export const authService = {
   },
 
   verifyOtp: async (email: string, otp: string) => {
+    checkOtpLockout(email.toLowerCase())
+
     const record = await prisma.passwordResetOtp.findFirst({
       where: { email: email.toLowerCase(), otp, used: false, expiresAt: { gt: new Date() } },
       orderBy: { createdAt: 'desc' },
     })
-    if (!record) throw new AppError(400, 'Invalid or expired OTP')
+    if (!record) {
+      recordOtpFailure(email.toLowerCase())
+      throw new AppError(400, 'Invalid or expired OTP')
+    }
+    clearOtpFailures(email.toLowerCase())
     return { ok: true, valid: true }
   },
 
   resetPassword: async (email: string, otp: string, newPassword: string) => {
+    checkOtpLockout(email.toLowerCase())
+
     const record = await prisma.passwordResetOtp.findFirst({
       where: { email: email.toLowerCase(), otp, used: false, expiresAt: { gt: new Date() } },
       orderBy: { createdAt: 'desc' },
     })
-    if (!record) throw new AppError(400, 'Invalid or expired OTP')
+    if (!record) {
+      recordOtpFailure(email.toLowerCase())
+      throw new AppError(400, 'Invalid or expired OTP')
+    }
+    clearOtpFailures(email.toLowerCase())
 
     const user = await userRepository.findByEmail(email.toLowerCase())
     if (!user) throw new AppError(404, 'User not found')
@@ -221,6 +280,7 @@ export const authService = {
       where: { id: user.id },
       data: { passwordHash: hash, tokenVersion: { increment: 1 } },
     })
+    invalidateTokenCache(user.id)
 
     // Mark OTP as used
     await prisma.passwordResetOtp.update({

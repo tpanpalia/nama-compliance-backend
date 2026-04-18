@@ -56,9 +56,6 @@ export const userRepository = {
   updateLastLogin: (id: string) =>
     prisma.user.update({ where: { id }, data: { lastLogin: new Date() } }),
 
-  updatePassword: (id: string, passwordHash: string) =>
-    prisma.user.update({ where: { id }, data: { passwordHash } }),
-
   updateStatus: (id: string, status: UserStatus) =>
     prisma.user.update({ where: { id }, data: { status } }),
 

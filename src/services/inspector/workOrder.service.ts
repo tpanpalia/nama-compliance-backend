@@ -32,9 +32,13 @@ export const inspectorWorkOrderService = {
     return { items, total }
   },
 
-  getById: async (id: string) => {
+  getById: async (userId: string, id: string) => {
     const wo = await workOrderRepository.findByIdForInspector(id)
     if (!wo) throw new AppError(404, 'Work order not found')
+    // Allow access to unassigned pool WOs (for pre-claim viewing) and own assigned WOs
+    if (wo.assignedInspectorId && wo.assignedInspectorId !== userId) {
+      throw new AppError(403, 'Not assigned to you')
+    }
     return wo
   },
 

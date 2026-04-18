@@ -37,17 +37,48 @@ const forgotPasswordSchema = z.object({ email: z.string().email() })
 const verifyOtpSchema = z.object({ email: z.string().email(), otp: z.string().length(6) })
 const resetPasswordSchema = z.object({ email: z.string().email(), otp: z.string().length(6), newPassword: z.string().min(8) })
 
+const REFRESH_COOKIE = 'nws_refresh_token'
+const isProduction = process.env.NODE_ENV === 'production'
+
+function setRefreshCookie(res: Response, refreshToken: string) {
+  res.cookie(REFRESH_COOKIE, refreshToken, {
+    httpOnly: true,
+    secure:   isProduction,
+    sameSite: isProduction ? 'strict' : 'lax',
+    path:     '/api/auth',
+    maxAge:   30 * 24 * 60 * 60 * 1000, // 30 days
+  })
+}
+
+function clearRefreshCookie(res: Response) {
+  res.clearCookie(REFRESH_COOKIE, { path: '/api/auth' })
+}
+
 export const login = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { email, password } = loginSchema.parse(req.body)
     const result = await authService.login(email, password)
-    res.json(result)
+
+    // Set refresh token as httpOnly cookie (web clients)
+    setRefreshCookie(res, result.refreshToken)
+
+    const isMobile = req.headers['x-client-type'] === 'mobile'
+
+    // Only include refreshToken in response body for mobile clients.
+    // Web clients receive it solely via the httpOnly cookie.
+    const { refreshToken, ...body } = result
+    res.json(isMobile ? result : body)
   } catch (err) { next(err) }
 }
 
 export const refresh = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { refreshToken } = z.object({ refreshToken: z.string() }).parse(req.body)
+    // Accept refresh token from cookie (web) or body (mobile)
+    const refreshToken = req.cookies?.[REFRESH_COOKIE] || req.body?.refreshToken
+    if (!refreshToken) {
+      res.status(401).json({ error: 'No refresh token provided' })
+      return
+    }
     const result = await authService.refresh(refreshToken)
     res.json(result)
   } catch (err) { next(err) }

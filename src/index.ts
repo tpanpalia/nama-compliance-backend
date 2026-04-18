@@ -8,6 +8,7 @@ import express from 'express'
 import cors from 'cors'
 import helmet from 'helmet'
 import rateLimit from 'express-rate-limit'
+import cookieParser from 'cookie-parser'
 import swaggerUi from 'swagger-ui-express'
 import yaml from 'js-yaml'
 import fs from 'fs'
@@ -39,6 +40,7 @@ app.use(cors({
 }))
 app.use(express.json({ limit: '10mb' }))
 app.use(express.urlencoded({ extended: true }))
+app.use(cookieParser())
 
 // ── Rate limiting ────────────────────────────────────────
 // General API: 100 requests per minute per IP
