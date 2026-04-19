@@ -6,6 +6,7 @@ import { userRepository } from '../../repositories/user.repository'
 import { contractorRepository } from '../../repositories/contractor.repository'
 import { auditLogRepository } from '../../repositories/auditLog.repository'
 import { notificationRepository } from '../../repositories/notification.repository'
+import { sendTempPasswordEmail } from '../../lib/email'
 
 export const accessRequestService = {
   list: async (params: { status?: string; role?: string; page: number; limit: number }) => {
@@ -80,6 +81,23 @@ export const accessRequestService = {
         },
       })
       userId = user.id
+    } else if (request.roleRequested === 'INSPECTOR') {
+      // Auto-generate employee ID since simple onboarding doesn't collect it
+      const employeeId = `EMP-INS-${Date.now().toString().slice(-8)}`
+      const user = await userRepository.create({
+        email:        request.email,
+        passwordHash,
+        role:         'INSPECTOR',
+        status:       'ACTIVE',
+        staffProfile: {
+          create: {
+            employeeId,
+            fullName: request.applicantName,
+            phone:    request.phone ?? '',
+          },
+        },
+      })
+      userId = user.id
     } else {
       const user = await userRepository.create({
         email:        request.email,
@@ -115,7 +133,14 @@ export const accessRequestService = {
       message: 'Welcome to the NWS Compliance System. Your account is now active.',
     })
 
-    return { ok: true, userId, tempPassword }
+    // Email the temp password to the user. If email fails, log but don't fail the approval.
+    try {
+      await sendTempPasswordEmail(request.email, tempPassword)
+    } catch (err) {
+      console.error('[APPROVE] Failed to send temp password email to', request.email, err)
+    }
+
+    return { ok: true, userId }
   },
 
   reject: async (performedBy: string, requestId: string, reason: string) => {

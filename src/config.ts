@@ -46,8 +46,9 @@ export const config = {
       bucket: optional('AWS_S3_BUCKET'),
     },
   },
-  resend: {
-    apiKey: optional('RESEND_API_KEY', ''),
-    fromEmail: optional('RESEND_FROM_EMAIL', 'noreply@nama.om'),
+  brevo: {
+    apiKey: optional('BREVO_API_KEY', ''),
+    senderEmail: optional('BREVO_SENDER_EMAIL', ''),
+    senderName: optional('BREVO_SENDER_NAME', 'NAMA Support'),
   },
 } as const

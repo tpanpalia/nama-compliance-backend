@@ -11,7 +11,7 @@ const registerSchema = z.object({
   applicantName:  z.string().min(2),
   email:          z.string().email(),
   phone:          z.string().optional(),
-  roleRequested:  z.enum(['CONTRACTOR', 'REGULATOR']),
+  roleRequested:  z.enum(['CONTRACTOR', 'REGULATOR', 'INSPECTOR']),
   contractorCr:   z.string().optional(),
   organization:   z.string().optional(),
   department:     z.string().optional(),

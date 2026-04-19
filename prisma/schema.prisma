@@ -96,6 +96,7 @@ enum UploadStatus {
 enum AccessRequestRole {
   CONTRACTOR
   REGULATOR
+  INSPECTOR
 }
 
 enum AccessRequestStatus {

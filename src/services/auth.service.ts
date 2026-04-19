@@ -123,7 +123,7 @@ export const authService = {
     applicantName: string
     email: string
     phone?: string
-    roleRequested: 'CONTRACTOR' | 'REGULATOR'
+    roleRequested: 'CONTRACTOR' | 'REGULATOR' | 'INSPECTOR'
     contractorCr?: string
     organization?: string
     department?: string

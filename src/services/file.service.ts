@@ -4,7 +4,7 @@ import { fileRepository } from '../repositories/file.repository'
 import { getStorageService } from '../lib/storage'
 
 export const fileService = {
-  presign: async (userId: string, data: {
+  presign: async (userId: string | null, data: {
     filename: string
     mimeType: string
     category: FileCategory
@@ -17,7 +17,7 @@ export const fileService = {
       category:     data.category,
       uploadStatus: 'PENDING',
       fileSize:     data.fileSize != null ? BigInt(data.fileSize) : undefined,
-      uploadedBy:   userId,
+      uploadedBy:   userId ?? undefined,
     })
 
     const storage = getStorageService()

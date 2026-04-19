@@ -27,7 +27,7 @@ const regDocSchema = z.object({
 router.post('/register/upload', async (req, res, next) => {
   try {
     const data = regDocSchema.parse(req.body)
-    const result = await fileService.presign('system', {
+    const result = await fileService.presign(null, {
       filename: data.filename,
       mimeType: data.mimeType,
       category: 'ACCESS_REQUEST_DOC',
