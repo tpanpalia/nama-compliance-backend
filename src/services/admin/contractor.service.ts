@@ -33,6 +33,7 @@ export const adminContractorService = {
       passwordHash,
       role:         'CONTRACTOR',
       status:       'ACTIVE',
+      mustChangePassword: true,
       contractorProfile: {
         create: {
           crNumber:           data.crNumber,

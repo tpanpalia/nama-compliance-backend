@@ -101,7 +101,14 @@ export const authService = {
     return {
       accessToken,
       refreshToken,
-      user: { id: user.id, email: user.email, role: user.role, status: user.status, profile },
+      user: {
+        id: user.id,
+        email: user.email,
+        role: user.role,
+        status: user.status,
+        mustChangePassword: user.mustChangePassword,
+        profile,
+      },
     }
   },
 
@@ -204,7 +211,7 @@ export const authService = {
     const hash = await bcrypt.hash(newPassword, 12)
     await prisma.user.update({
       where: { id: userId },
-      data: { passwordHash: hash, tokenVersion: { increment: 1 } },
+      data: { passwordHash: hash, tokenVersion: { increment: 1 }, mustChangePassword: false },
     })
     invalidateTokenCache(userId)
     return { message: 'Password updated' }
@@ -278,7 +285,7 @@ export const authService = {
     // Update password and increment tokenVersion to invalidate all existing tokens
     await prisma.user.update({
       where: { id: user.id },
-      data: { passwordHash: hash, tokenVersion: { increment: 1 } },
+      data: { passwordHash: hash, tokenVersion: { increment: 1 }, mustChangePassword: false },
     })
     invalidateTokenCache(user.id)
 

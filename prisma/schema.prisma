@@ -191,6 +191,7 @@ model User {
   failedLoginAttempts  Int             @default(0) @map("failed_login_attempts")
   lockedUntil          DateTime?       @map("locked_until") @db.Timestamptz
   tokenVersion         Int             @default(0) @map("token_version")
+  mustChangePassword   Boolean         @default(false) @map("must_change_password")
   createdAt            DateTime        @default(now()) @map("created_at") @db.Timestamptz
   updatedAt            DateTime        @updatedAt @map("updated_at") @db.Timestamptz
 

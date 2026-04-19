@@ -70,6 +70,7 @@ export const accessRequestService = {
         passwordHash,
         role:         'CONTRACTOR',
         status:       'ACTIVE',
+        mustChangePassword: true,
         contractorProfile: {
           create: {
             crNumber:    request.contractorCr,
@@ -89,6 +90,7 @@ export const accessRequestService = {
         passwordHash,
         role:         'INSPECTOR',
         status:       'ACTIVE',
+        mustChangePassword: true,
         staffProfile: {
           create: {
             employeeId,
@@ -104,6 +106,7 @@ export const accessRequestService = {
         passwordHash,
         role:         'REGULATOR',
         status:       'ACTIVE',
+        mustChangePassword: true,
         regulatorProfile: {
           create: {
             fullName:     request.applicantName,

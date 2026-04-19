@@ -54,6 +54,7 @@ export const adminUserService = {
       passwordHash,
       role:         data.role,
       status:       'ACTIVE',
+      mustChangePassword: true,
       staffProfile: {
         create: { employeeId: data.employeeId, fullName: data.fullName, phone: data.phone },
       },
