@@ -462,6 +462,14 @@ async function buildReportHTML(params: ReportParams): Promise<{ html: string; is
     orderBy: { allocationDate: 'desc' },
   }) as unknown as WorkOrderWithRelations[]
 
+  const validWorkOrders = workOrders.filter(wo => {
+    if (!wo.contractor) {
+      console.warn('[PDF] skipping work order with missing contractor profile:', wo.id, 'contractorCr:', wo.contractorCr)
+      return false
+    }
+    return true
+  })
+
   const checklistItems = await prisma.checklistItem.findMany({ where: { isActive: true }, select: { id: true, question: true, category: true } })
   const checklistItemMap = new Map(checklistItems.map(ci => [ci.id, { question: ci.question, category: ci.category }]))
 
@@ -478,8 +486,8 @@ async function buildReportHTML(params: ReportParams): Promise<{ html: string; is
   const isLandscape = reportType === 'contractor-performance'
 
   const html = reportType === 'performance-summary'
-    ? generatePerformanceSummaryHTML(workOrders, regionNames, years, activeMonths, logo, checklistItemMap, cachedScores)
-    : generateContractorPerformanceHTML(workOrders, years, activeMonths, logo)
+    ? generatePerformanceSummaryHTML(validWorkOrders, regionNames, years, activeMonths, logo, checklistItemMap, cachedScores)
+    : generateContractorPerformanceHTML(validWorkOrders, years, activeMonths, logo)
 
   return { html, isLandscape }
 }
