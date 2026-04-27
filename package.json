@@ -13,8 +13,11 @@
     "db:migrate:deploy": "prisma migrate deploy",
     "db:seed": "tsx prisma/seed.ts",
     "db:seed:test": "tsx prisma/seed-test-data.ts",
+    "db:seed:minimal": "tsx prisma/seed-minimal.ts",
+    "storage:cleanup": "tsx prisma/cleanup-storage.ts",
     "db:studio": "prisma studio",
-    "db:reset": "prisma migrate reset"
+    "db:apply-functions": "tsx prisma/apply-functions.ts",
+    "db:reset": "prisma db push --force-reset && tsx prisma/seed.ts && tsx prisma/apply-functions.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1019.0",
